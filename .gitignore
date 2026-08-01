@@ -11,6 +11,11 @@ static/faces/
 # Es un secreto por instalación y nunca debe compartirse.
 .flask_secret
 
+# Configuración local: incluye las URLs de las cámaras y las credenciales
+# ONVIF. Es propia de cada instalación y no debe versionarse.
+# La plantilla con la estructura está en config.example.json.
+config.json
+
 # Entornos virtuales
 venv/
 .venv/

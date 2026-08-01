@@ -1,0 +1,47 @@
+{
+    "_comentario": [
+        "Plantilla de configuración. Copia este archivo como config.json y ajústalo.",
+        "config.json no se versiona: contiene las URLs de tus cámaras y las",
+        "credenciales ONVIF de cada una.",
+        "",
+        "Si config.json no existe, la aplicación arranca sin cámaras y las crea",
+        "desde la interfaz. Los identificadores se generan automáticamente."
+    ],
+
+    "cameras": [
+        {
+            "id": "00000000-0000-0000-0000-000000000000",
+            "name": "Cámara de ejemplo (IP)",
+            "type": "IP",
+            "source": "rtsp://usuario:contrasena@192.168.1.100:554/stream1",
+            "ip": "192.168.1.100",
+            "onvif_port": 80,
+            "user": "",
+            "password": "",
+            "is_ptz": false
+        },
+        {
+            "id": "00000000-0000-0000-0000-000000000001",
+            "name": "Webcam local (USB)",
+            "type": "USB",
+            "source": "0"
+        }
+    ],
+
+    "display_settings": {
+        "show_fps": true,
+        "show_labels": true,
+        "show_speed": false
+    },
+
+    "detection_mode": "monitored",
+
+    "alpr_settings": {
+        "plate_format": "generic",
+        "min_confidence": 0.5
+    },
+
+    "security_settings": {
+        "session_timeout_minutes": 15
+    }
+}
