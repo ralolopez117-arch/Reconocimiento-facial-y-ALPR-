@@ -1,0 +1,315 @@
+"""
+tracking_utils.py
+-----------------
+Utilidades para estabilizar el seguimiento de objetos:
+
+1. TrackClassVoter: votación temporal por track_id para evitar parpadeo
+   de etiquetas entre clases similares (auto↔camión, persona↔moto).
+
+2. disambiguate_class: reglas heurísticas basadas en el tamaño/aspecto del
+   bounding box para resolver confusiones frecuentes entre clases cercanas.
+"""
+
+from collections import defaultdict, Counter
+import math
+import cv2
+import numpy as np
+
+
+# ---------------------------------------------------------------------------
+# Clases de COCO referenciadas por índice
+# ---------------------------------------------------------------------------
+CLS_PERSON    = 0
+CLS_BICYCLE   = 1
+CLS_CAR       = 2
+CLS_MOTORCYCLE= 3
+CLS_BUS       = 5
+CLS_TRAIN     = 6
+CLS_TRUCK     = 7
+CLS_BOAT      = 8
+
+
+# ---------------------------------------------------------------------------
+# Votación temporal por track_id
+# ---------------------------------------------------------------------------
+class TrackClassVoter:
+    """
+    Mantiene un historial de las últimas `window` predicciones de clase
+    para cada track_id y devuelve la clase mayoritaria.
+
+    Esto estabiliza etiquetas que oscilan entre clases en frames consecutivos
+    (ej. auto→camión→auto) mostrando siempre la clase más frecuente reciente.
+    """
+
+    def __init__(self, window: int = 10):
+        """
+        Args:
+            window: número de frames recientes a considerar en el voto.
+                    Mayor window → más estabilidad, más latencia al cambiar.
+        """
+        self.window = window
+        # {tracker_id: deque de class_id}
+        self._history: dict = defaultdict(list)
+
+    def update_and_vote(self, tracker_id: int, class_id: int) -> int:
+        """
+        Registra la nueva predicción y devuelve la clase ganadora del voto.
+        """
+        hist = self._history[tracker_id]
+        hist.append(class_id)
+        # Mantener solo los últimos `window` valores
+        if len(hist) > self.window:
+            hist.pop(0)
+        winner, _ = Counter(hist).most_common(1)[0]
+        return int(winner)
+
+    def purge(self, active_ids: set):
+        """Elimina tracks que ya no están activos para liberar memoria."""
+        for tid in list(self._history.keys()):
+            if tid not in active_ids:
+                del self._history[tid]
+
+
+# ---------------------------------------------------------------------------
+# Desambiguación de clase por geometría del bounding box
+# ---------------------------------------------------------------------------
+def disambiguate_class(class_id: int, xyxy: np.ndarray, frame_shape: tuple) -> int:
+    """
+    Aplica reglas heurísticas para corregir clasificaciones erróneas
+    frecuentes en cámaras de tráfico/videovigilancia.
+
+    Reglas implementadas:
+    ─────────────────────
+    Truck (7) → Car (2):
+        Si el ancho del bbox es menor al 8% del ancho del frame Y el área
+        es menor al 3% del frame, probablemente es un auto o camioneta
+        pickup visto de lejos, no un camión.
+
+    Truck (7) → Car (2) [aspecto]:
+        Los camiones reales son más anchos que altos (aspect > 1.8).
+        Si el bbox es casi cuadrado o vertical, es más probable un auto/pickup.
+
+    Person (0) → Motorcycle (3):
+        Las personas son más altas que anchas (aspect < 0.7 típicamente).
+        Si el bbox detectado como "person" es más ancho que alto (aspect > 1.0)
+        probablemente es una motocicleta con jinete.
+
+    Train (6) → Truck (7):
+        Los trenes son extremadamente anchos. Si la detección de tren no
+        ocupa al menos el 30% del ancho del frame, puede ser un camión.
+
+    Boat (8) → None (filtrar):
+        Si el objeto no está en la parte inferior del frame (agua/calle),
+        es más probable que sea otro objeto mal clasificado.
+        Esta función devuelve CLS_BOAT con confianza reducida a nivel del
+        caller (la función devuelve -1 para señalar "ignorar detección").
+
+    Args:
+        class_id:    clase predicha por YOLO (índice COCO)
+        xyxy:        array [x1, y1, x2, y2] del bounding box en píxeles
+        frame_shape: tupla (height, width, channels) del frame
+
+    Returns:
+        class_id posiblemente corregido. Devuelve -1 para señalar que
+        la detección debe ser descartada.
+    """
+    x1, y1, x2, y2 = float(xyxy[0]), float(xyxy[1]), float(xyxy[2]), float(xyxy[3])
+    frame_h, frame_w = frame_shape[0], frame_shape[1]
+
+    bbox_w = x2 - x1
+    bbox_h = y2 - y1
+    bbox_area = bbox_w * bbox_h
+    frame_area = frame_w * frame_h
+
+    if bbox_w <= 0 or bbox_h <= 0:
+        return class_id
+
+    aspect = bbox_w / bbox_h          # >1 = más ancho que alto (horizontal)
+    rel_w  = bbox_w / frame_w         # fracción del ancho del frame
+    rel_area = bbox_area / frame_area  # fracción del área del frame
+
+    # ------------------------------------------------------------------
+    # Regla 1 — Truck pequeño o cuadrado → Car
+    #   Los camiones/tráilers reales son anchos y grandes.
+    #   Si el bbox es pequeño O no es horizontal → probablemente auto/pickup
+    # ------------------------------------------------------------------
+    if class_id == CLS_TRUCK:
+        # Muy pequeño en relación al frame → auto o pickup lejano
+        if rel_area < 0.025 and rel_w < 0.12:
+            return CLS_CAR
+        # Más alto que ancho → no es camión (podría ser una camioneta de frente/atrás)
+        if aspect < 0.85:
+            return CLS_CAR
+
+    # ------------------------------------------------------------------
+    # Regla 2 — Person con aspect ratio horizontal → Motorcycle
+    #   Una persona de pie siempre es más alta que ancha (aspect < 0.8).
+    #   Si aparece horizontal/cuadrada es jinete en moto.
+    # ------------------------------------------------------------------
+    if class_id == CLS_PERSON:
+        if aspect > 0.95:
+            return CLS_MOTORCYCLE
+
+    # ------------------------------------------------------------------
+    # Regla 3 — Train que no ocupa gran parte del frame → Truck
+    #   Un tren real tapa la mayor parte del encuadre horizontalmente.
+    # ------------------------------------------------------------------
+    if class_id == CLS_TRAIN:
+        if rel_w < 0.35:
+            return CLS_TRUCK
+
+    # ------------------------------------------------------------------
+    # Regla 4 — Boat que no está en zona inferior del frame → descartar
+    #   En cámaras de tráfico terrestre, un barco en la parte alta del
+    #   frame casi siempre es un falso positivo (tanque, tubo, etc.).
+    # ------------------------------------------------------------------
+    if class_id == CLS_BOAT:
+        y_center_rel = ((y1 + y2) / 2) / frame_h
+        if y_center_rel < 0.65:   # No está en la mitad inferior
+            return -1             # Señal de "descartar"
+
+    return class_id
+
+
+# ---------------------------------------------------------------------------
+# Ghost box rendering — muestra posición predicha de tracks perdidos
+# ---------------------------------------------------------------------------
+
+# Máximo de frames perdidos para seguir mostrando el ghost box.
+# A 25fps, 25 frames = 1 segundo de predicción visual.
+# lost_track_buffer del tracker puede ser mayor; el ghost deja de dibujarse
+# antes para no generar ruido visual de tracks muy viejos.
+GHOST_MAX_FRAMES = 25
+
+# Color del ghost box: naranja ámbar para distinguirlo de detecciones reales
+GHOST_COLOR = (0, 165, 255)   # BGR: naranja
+
+
+def _draw_dashed_rect(img: np.ndarray, x1: int, y1: int, x2: int, y2: int,
+                      color: tuple, thickness: int = 1, dash_len: int = 10) -> None:
+    """
+    Dibuja un rectángulo con borde discontinuo (dashed) sobre 'img' in-place.
+    Se usan 4 segmentos de línea (top, right, bottom, left) con huecos regulares.
+    """
+    # Los 4 lados: (ax,ay) → (bx,by)
+    sides = [
+        (x1, y1, x2, y1),   # top
+        (x2, y1, x2, y2),   # right
+        (x2, y2, x1, y2),   # bottom
+        (x1, y2, x1, y1),   # left
+    ]
+    for ax, ay, bx, by in sides:
+        dx, dy = bx - ax, by - ay
+        length = max(1, int(math.hypot(dx, dy)))
+        step = dash_len * 2
+        for i in range(0, length, step):
+            t0 = i / length
+            t1 = min((i + dash_len) / length, 1.0)
+            p0 = (int(ax + t0 * dx), int(ay + t0 * dy))
+            p1 = (int(ax + t1 * dx), int(ay + t1 * dy))
+            cv2.line(img, p0, p1, color, thickness, cv2.LINE_AA)
+
+
+def draw_ghost_box(img: np.ndarray, x1: int, y1: int, x2: int, y2: int,
+                   label: str = "", color: tuple = GHOST_COLOR,
+                   alpha: float = 0.12, dash_len: int = 9) -> None:
+    """
+    Dibuja un "ghost box" semitransparente con borde discontinuo para indicar
+    la posición predicha (Kalman) de un track perdido por oclusión.
+
+    Args:
+        img:      frame BGR sobre el que se dibuja (modificado in-place)
+        x1,y1,   esquina superior-izquierda del bounding box predicho
+        x2,y2:   esquina inferior-derecha del bounding box predicho
+        label:   texto de etiqueta (ej. "#12 ~Auto")
+        color:   color BGR del borde y etiqueta
+        alpha:   opacidad del relleno semitransparente (0=invisible, 1=sólido)
+        dash_len: longitud de cada trazo discontinuo en píxeles
+    """
+    h, w = img.shape[:2]
+
+    # Clamp a los límites del frame
+    x1 = max(0, min(int(x1), w - 1))
+    y1 = max(0, min(int(y1), h - 1))
+    x2 = max(x1 + 1, min(int(x2), w - 1))
+    y2 = max(y1 + 1, min(int(y2), h - 1))
+
+    if x2 <= x1 or y2 <= y1:
+        return
+
+    # Relleno semitransparente
+    overlay = img.copy()
+    cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
+    cv2.addWeighted(overlay, alpha, img, 1.0 - alpha, 0, img)
+
+    # Borde discontinuo
+    _draw_dashed_rect(img, x1, y1, x2, y2, color, thickness=1, dash_len=dash_len)
+
+    # Etiqueta compacta
+    if label:
+        font        = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale  = 0.42
+        thickness   = 1
+        (tw, th), _ = cv2.getTextSize(label, font, font_scale, thickness)
+        lx = x1 + 2
+        ly = y1 + th + 3
+        # Fondo de texto
+        cv2.rectangle(img, (lx - 1, ly - th - 2), (lx + tw + 2, ly + 2), (20, 20, 20), -1)
+        cv2.putText(img, label, (lx, ly), font, font_scale, color, thickness, cv2.LINE_AA)
+
+
+def render_ghost_tracks(
+    img: np.ndarray,
+    tracker,
+    frame_count: int,
+    track_last_seen: dict,
+    track_last_class: dict,
+    get_label_fn,
+    ghost_max_frames: int = GHOST_MAX_FRAMES,
+) -> None:
+    """
+    Recorre tracker.lost_tracks y dibuja ghost boxes para los tracks que
+    fueron vistos recientemente y ahora están perdidos por oclusión.
+
+    Args:
+        img:               frame BGR (modificado in-place)
+        tracker:           instancia de sv.ByteTrack
+        frame_count:       frame actual del stream
+        track_last_seen:   dict {track_id → frame_count cuando se vio por última vez}
+        track_last_class:  dict {track_id → class_id votado más reciente}
+        get_label_fn:      función get_label_es(class_id) → str
+        ghost_max_frames:  máximo de frames perdidos para mostrar ghost
+    """
+    lost_tracks = getattr(tracker, 'lost_tracks', [])
+    if not lost_tracks:
+        return
+
+    for lost_track in lost_tracks:
+        try:
+            tid = int(lost_track.track_id)
+            last_seen = track_last_seen.get(tid)
+            if last_seen is None:
+                continue
+            frames_lost = frame_count - last_seen
+            if frames_lost <= 0 or frames_lost > ghost_max_frames:
+                continue
+
+            # Posición predicha por el filtro de Kalman del tracker
+            tlbr = lost_track.tlbr          # [x1, y1, x2, y2]
+            x1, y1, x2, y2 = int(tlbr[0]), int(tlbr[1]), int(tlbr[2]), int(tlbr[3])
+
+            cls_id  = track_last_class.get(tid, -1)
+            cls_str = get_label_fn(cls_id) if cls_id >= 0 else "?"
+            # "~" indica que es posición predicha (no detectada directamente)
+            ghost_label = f"#{tid} ~{cls_str}"
+
+            # Reducir alpha a medida que el track lleva más tiempo perdido
+            # (fade-out gradual: de 0.15 a 0.04 conforme frames_lost → ghost_max_frames)
+            fade = 1.0 - (frames_lost / ghost_max_frames)
+            alpha = max(0.04, 0.15 * fade)
+
+            draw_ghost_box(img, x1, y1, x2, y2, label=ghost_label, alpha=alpha)
+
+        except Exception:
+            # Nunca romper el stream por un ghost box fallido
+            pass

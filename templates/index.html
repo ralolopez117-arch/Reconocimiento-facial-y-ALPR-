@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitoreo Inteligente</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+    <!-- Sidebar / Camera Panel -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h2>Mis Cámaras</h2>
+            <button id="add-camera-btn" class="btn-primary">+ Agregar</button>
+        </div>
+        <ul class="camera-list" id="camera-list">
+            <!-- Cameras injected via JS -->
+        </ul>
+
+        <!-- Display & Detection Settings Panel -->
+        <div class="display-settings-panel">
+            <h3 class="display-settings-title">⚙ Modo de Detección</h3>
+            <div class="detection-mode-selector" style="margin-bottom: 14px; display: flex; flex-direction: column; gap: 8px;">
+                <label class="radio-row" style="font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                    <input type="radio" name="detection_mode" value="monitored" id="mode-monitored" checked>
+                    <span>🔘 <strong>Modo Pantalla:</strong> Detectar solo en cámaras visibles</span>
+                </label>
+                <label class="radio-row" style="font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                    <input type="radio" name="detection_mode" value="all" id="mode-all">
+                    <span>🔘 <strong>Modo Total:</strong> Detectar en todas las cámaras (Segundo plano)</span>
+                </label>
+            </div>
+
+            <h3 class="display-settings-title">⚙ Visualización</h3>
+            <label class="toggle-row">
+                <span>FPS</span>
+                <input type="checkbox" id="toggle-fps" checked>
+                <span class="toggle-slider"></span>
+            </label>
+            <label class="toggle-row">
+                <span>Etiquetas / Objetos</span>
+                <input type="checkbox" id="toggle-labels" checked>
+                <span class="toggle-slider"></span>
+            </label>
+            <label class="toggle-row">
+                <span>Velocidad estimada</span>
+                <input type="checkbox" id="toggle-speed" checked>
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
+    </aside>
+
+    <!-- Main Grid -->
+    <main class="main-content">
+        <header class="top-nav">
+            <button id="toggle-sidebar" class="btn-icon">☰</button>
+            <h1 style="font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Centro de Monitoreo Inteligente</h1>
+            <!-- Compact icon-only buttons for FR and ALPR -->
+            <button id="open-fr-btn" class="btn-secondary" title="Reconocimiento Facial" style="padding: 7px 10px; white-space: nowrap;">👤 <span class="nav-label">Reconocimiento Facial</span></button>
+            <button id="open-alpr-btn" class="btn-secondary" title="Placas (ALPR)" style="padding: 7px 10px; white-space: nowrap;">🚗 <span class="nav-label">Placas (ALPR)</span></button>
+            <!-- Layout selector + clear button -->
+            <div style="display:flex; align-items:center; gap:5px; background: rgba(0,0,0,0.25); padding: 4px 6px; border-radius: 8px; border: 1px solid var(--border-color); flex-shrink: 0;">
+                <button class="layout-btn" data-layout="1" title="1 Cámara">
+                    <svg viewBox="0 0 18 18" fill="currentColor"><rect x="1" y="1" width="16" height="16" rx="2"/></svg>
+                </button>
+                <button class="layout-btn active" data-layout="4" title="4 Cámaras">
+                    <svg viewBox="0 0 18 18" fill="currentColor"><rect x="1" y="1" width="7" height="7" rx="1"/><rect x="10" y="1" width="7" height="7" rx="1"/><rect x="1" y="10" width="7" height="7" rx="1"/><rect x="10" y="10" width="7" height="7" rx="1"/></svg>
+                </button>
+                <button class="layout-btn" data-layout="6" title="6 Cámaras">
+                    <svg viewBox="0 0 18 18" fill="currentColor"><rect x="1" y="1" width="4" height="7" rx="1"/><rect x="7" y="1" width="4" height="7" rx="1"/><rect x="13" y="1" width="4" height="7" rx="1"/><rect x="1" y="10" width="4" height="7" rx="1"/><rect x="7" y="10" width="4" height="7" rx="1"/><rect x="13" y="10" width="4" height="7" rx="1"/></svg>
+                </button>
+                <button class="layout-btn" data-layout="8" title="8 Cámaras">
+                    <svg viewBox="0 0 18 18" fill="currentColor"><rect x="1" y="1" width="3" height="7" rx="1"/><rect x="5.5" y="1" width="3" height="7" rx="1"/><rect x="10" y="1" width="3" height="7" rx="1"/><rect x="14.5" y="1" width="3" height="7" rx="1"/><rect x="1" y="10" width="3" height="7" rx="1"/><rect x="5.5" y="10" width="3" height="7" rx="1"/><rect x="10" y="10" width="3" height="7" rx="1"/><rect x="14.5" y="10" width="3" height="7" rx="1"/></svg>
+                </button>
+                <!-- Separator -->
+                <div style="width:1px; height:18px; background: rgba(255,255,255,0.15); margin: 0 2px;"></div>
+                <!-- Clear all streams button -->
+                <button id="clear-all-streams-btn" title="Limpiar todos los paneles de video" class="layout-btn" style="color: #f87171; width: 30px; height: 30px;">
+                    <svg viewBox="0 0 24 24" fill="currentColor" width="15" height="15"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                </button>
+            </div>
+        </header>
+
+
+        <div class="grid-container layout-4" id="grid-container">
+            <!-- Video cells injected by JS -->
+        </div>
+    </main>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="modal-overlay">
+        <div class="modal" style="max-height: 90vh; overflow-y: auto;">
+            <h3 id="modal-title">Configurar Cámara</h3>
+            <input type="hidden" id="modal-cam-id">
+            
+            <label>Nombre:</label>
+            <input type="text" id="modal-name" placeholder="Ej. Entrada Principal">
+            
+            <label>Tipo:</label>
+            <select id="modal-type">
+                <option value="USB">USB</option>
+                <option value="IP">IP / Red</option>
+            </select>
+            
+            <label>Fuente (URL o Índice):</label>
+            <input type="text" id="modal-source" placeholder="Ej. 0 o rtsp://...">
+
+            <hr style="border: none; border-top: 1px solid var(--border-color); margin: 15px 0;">
+            <h4 style="margin-bottom: 10px; font-size: 0.9em; color: var(--primary);">Configuración ONVIF / PTZ</h4>
+
+            <label class="toggle-row" style="margin-bottom: 12px;">
+                <span>Habilitar Control PTZ (ONVIF)</span>
+                <input type="checkbox" id="modal-is-ptz">
+                <span class="toggle-slider"></span>
+            </label>
+
+            <div id="onvif-fields">
+                <label>Dirección IP Cámara:</label>
+                <input type="text" id="modal-ip" placeholder="Ej. 192.168.1.100">
+
+                <label>Puerto ONVIF (Default 80):</label>
+                <input type="number" id="modal-onvif-port" placeholder="80" value="80">
+
+                <label>Usuario ONVIF:</label>
+                <input type="text" id="modal-user" placeholder="admin">
+
+                <label>Contraseña ONVIF:</label>
+                <input type="password" id="modal-password" placeholder="••••••••">
+            </div>
+            
+            <div class="modal-actions">
+                <button id="modal-cancel" class="btn-secondary">Cancelar</button>
+                <button id="modal-save" class="btn-primary">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ALPR Dashboard Modal -->
+    <div class="modal-overlay" id="alpr-modal-overlay">
+        <div class="modal alpr-modal">
+            <div class="alpr-header">
+                <h3>🚗 Panel de Placas (ALPR)</h3>
+                <button id="alpr-close" class="btn-icon">×</button>
+            </div>
+
+            <!-- Tabs -->
+            <div class="fr-tabs">
+                <button class="fr-tab active" data-tab="alpr-tab-detections">📋 Detecciones</button>
+                <button class="fr-tab" data-tab="alpr-tab-register">➕ Registrar Placa</button>
+                <button class="fr-tab" data-tab="alpr-tab-manage">⚙ Gestionar Registro</button>
+            </div>
+
+            <!-- Tab: Detecciones Generales -->
+            <div id="alpr-tab-detections" class="fr-tab-content active">
+                <div class="alpr-search" style="margin-bottom: 12px;">
+                    <input type="text" id="alpr-search-input" placeholder="🔍 Buscar por placa o cámara..." style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-color);">
+                </div>
+                <div class="alpr-table-container">
+                    <table class="alpr-table">
+                        <thead>
+                            <tr>
+                                <th>Placa</th>
+                                <th>Cámara</th>
+                                <th>Confianza</th>
+                                <th>Fecha y Hora</th>
+                            </tr>
+                        </thead>
+                        <tbody id="alpr-table-body">
+                            <!-- Filled by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Tab: Register -->
+            <div id="alpr-tab-register" class="fr-tab-content">
+                <form id="alpr-register-form">
+                    <div style="display: flex; flex-direction: column; gap: 12px;">
+                        <div>
+                            <label style="display:block; font-size: 0.85em; color: var(--text-muted); margin-bottom: 6px;">Placa / Matrícula</label>
+                            <input type="text" id="alpr-register-pattern" placeholder="Ej. ABC123" required
+                                style="width: 100%; box-sizing: border-box; font-size: 1em; padding: 9px 12px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-color); outline: none; text-transform: uppercase;">
+                        </div>
+                        <div>
+                            <label style="display:block; font-size: 0.85em; color: var(--text-muted); margin-bottom: 6px;">Nota (Opcional)</label>
+                            <input type="text" id="alpr-register-note" placeholder="Ej. Vehículo sospechoso"
+                                style="width: 100%; box-sizing: border-box; font-size: 1em; padding: 9px 12px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-color); outline: none;">
+                        </div>
+                        <button type="submit" class="btn-primary" style="align-self: flex-end; padding: 9px 22px;">✔ Registrar Placa</button>
+                    </div>
+                </form>
+                <div id="alpr-register-msg" style="margin-top: 12px; font-size: 0.9em;"></div>
+            </div>
+
+            <!-- Tab: Manage -->
+            <div id="alpr-tab-manage" class="fr-tab-content">
+                <div style="display: flex; justify-content: flex-end; margin-bottom: 12px;">
+                    <button id="alpr-delete-all-btn" class="btn-danger">🗑 Eliminar Todas</button>
+                </div>
+                <div class="alpr-table-container">
+                    <table class="alpr-table">
+                        <thead>
+                            <tr>
+                                <th>Placa / Patrón</th>
+                                <th>Nota</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="alpr-watched-table-body">
+                            <!-- Filled by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+        </div>
+    </div>
+
+    <!-- Face Recognition Dashboard Modal -->
+    <div class="modal-overlay" id="fr-modal-overlay">
+        <div class="modal alpr-modal">
+            <div class="alpr-header">
+                <h3>👤 Reconocimiento Facial</h3>
+                <button id="fr-close" class="btn-icon">×</button>
+            </div>
+
+            <!-- Tabs -->
+            <div class="fr-tabs">
+                <button class="fr-tab active" data-tab="fr-tab-register">➕ Registrar</button>
+                <button class="fr-tab" data-tab="fr-tab-manage">⚙ Gestionar Rostros</button>
+                <button class="fr-tab" data-tab="fr-tab-detections">📋 Detecciones</button>
+            </div>
+
+            <!-- Tab: Register -->
+            <div id="fr-tab-register" class="fr-tab-content active">
+                <form id="fr-register-form">
+                    <div style="display: flex; flex-direction: column; gap: 12px;">
+                        <div>
+                            <label style="display:block; font-size: 0.85em; color: var(--text-muted); margin-bottom: 6px;">Nombre completo</label>
+                            <input type="text" id="fr-register-name" placeholder="Ej. Juan Pérez" required
+                                style="width: 100%; box-sizing: border-box; font-size: 1em; padding: 9px 12px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-color); outline: none;">
+                        </div>
+                        <div>
+                            <label style="display:block; font-size: 0.85em; color: var(--text-muted); margin-bottom: 6px;">Fotografía (JPG, PNG)</label>
+                            <label for="fr-register-image" class="file-picker-label">
+                                <span id="fr-file-name">📂 Seleccionar imagen...</span>
+                            </label>
+                            <input type="file" id="fr-register-image" accept="image/*" required
+                                style="display:none;" onchange="document.getElementById('fr-file-name').textContent = this.files[0]?.name || '📂 Seleccionar imagen...'">
+                        </div>
+                        <button type="submit" class="btn-primary" style="align-self: flex-end; padding: 9px 22px;">✔ Registrar Rostro</button>
+                    </div>
+                </form>
+                <div id="fr-register-msg" style="margin-top: 12px; font-size: 0.9em;"></div>
+            </div>
+
+            <!-- Tab: Manage -->
+            <div id="fr-tab-manage" class="fr-tab-content">
+                <div style="display: flex; justify-content: flex-end; margin-bottom: 12px;">
+                    <button id="fr-delete-all-btn" class="btn-danger">🗑 Eliminar Todos</button>
+                </div>
+                <div class="alpr-table-container">
+                    <table class="alpr-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 50px;">Foto</th>
+                                <th>Nombre</th>
+                                <th style="text-align: right;">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fr-known-table-body">
+                            <!-- Filled by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Tab: Detections -->
+            <div id="fr-tab-detections" class="fr-tab-content">
+                <div class="alpr-table-container">
+                    <table class="alpr-table">
+                        <thead>
+                            <tr>
+                                <th>Nombre</th>
+                                <th>Cámara</th>
+                                <th>Confianza</th>
+                                <th>Fecha y Hora</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fr-table-body">
+                            <!-- Filled by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="toast-container"></div>
+    
+    <!-- Audio element for alert -->
+    <audio id="alert-sound" src="{{ url_for('static', filename='alert.ogg') }}" preload="auto"></audio>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

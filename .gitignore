@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+
+# Base de datos local (detecciones, placas, rostros)
+alpr_data.db
+
+# Fotos de rostros registrados
+static/faces/
+
+# Entornos virtuales
+venv/
+.venv/
+env/
