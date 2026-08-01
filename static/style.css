@@ -1,7 +1,24 @@
-:root {
+/* ===========================================================================
+   Temas
+   ---------------------------------------------------------------------------
+   Toda la interfaz se pinta a partir de estas variables. Cambiar de tema es
+   redefinirlas: ninguna regla más abajo debería llevar un color fijo, salvo el
+   área de vídeo, que se mantiene oscura en ambos temas porque enmarca imagen.
+
+   El tema se aplica con el atributo data-theme en <html>, escrito por el
+   servidor según la preferencia del usuario. Al ir en la propia respuesta HTML,
+   la página ya nace con el tema correcto y no hay un destello del tema anterior.
+   =========================================================================== */
+
+:root,
+:root[data-theme="dark"] {
     --bg-color: #0f172a;
-    --panel-bg: rgba(30, 41, 59, 0.7);
-    --border-color: rgba(255, 255, 255, 0.1);
+    --panel-bg: rgba(30,41,59,0.7);
+    --nav-bg: rgba(15,23,42,0.8);
+    --modal-bg: #1e293b;
+    --grid-from: #1e293b;
+    --grid-to: #0f172a;
+
     --primary: #3b82f6;
     --primary-hover: #2563eb;
     --text-main: #f8fafc;
@@ -15,12 +32,65 @@
        nombre sin que estuviera declarado, dejando el texto sin color propio. */
     --text-color: #f8fafc;
 
-    /* Indica al navegador que la interfaz es oscura, para que dibuje los
-       controles nativos en consecuencia: la lista desplegable de los <select>,
-       las barras de desplazamiento y los cursores de los campos. Sin esto, el
-       desplegable de países se abría con el tema claro del sistema y quedaba
-       texto casi blanco sobre fondo casi blanco. */
+    /* Velos translúcidos reutilizados en toda la interfaz. En tema oscuro son
+       blancos a muy baja opacidad; en claro se invierten a tinta, porque un
+       velo blanco sobre fondo claro sería invisible. */
+    --surface-1: rgba(255,255,255,0.03);
+    --surface-2: rgba(255,255,255,0.05);
+    --surface-3: rgba(255,255,255,0.1);
+    --surface-4: rgba(255,255,255,0.15);
+    --surface-sunken: rgba(0,0,0,0.25);
+    --scrim: rgba(0,0,0,0.6);
+
+    --accent-soft: rgba(59,130,246,0.1);
+    --accent-soft-strong: rgba(59,130,246,0.25);
+
+    --border-color: var(--surface-3);
+
+    /* Indica al navegador el tema, para que dibuje los controles nativos en
+       consecuencia: la lista desplegable de los <select>, las barras de
+       desplazamiento y los cursores de los campos. */
     color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+    --bg-color: #f1f5f9;
+    --panel-bg: rgba(255,255,255,0.85);
+    --nav-bg: rgba(255,255,255,0.9);
+    --modal-bg: #ffffff;
+    --grid-from: #e2e8f0;
+    --grid-to: #cbd5e1;
+
+    /* Azul algo más oscuro que en tema oscuro: el original no alcanzaba
+       contraste suficiente sobre fondo claro. */
+    --primary: #2563eb;
+    --primary-hover: #1d4ed8;
+    --text-main: #0f172a;
+    --text-muted: #475569;
+
+    --bg-card: #ffffff;
+    --text-color: #0f172a;
+
+    /* Velos de tinta en lugar de blancos */
+    --surface-1: rgba(15,23,42,0.03);
+    --surface-2: rgba(15,23,42,0.06);
+    --surface-3: rgba(15,23,42,0.10);
+    --surface-4: rgba(15,23,42,0.16);
+    --surface-sunken: rgba(15,23,42,0.06);
+    --scrim: rgba(15,23,42,0.45);
+
+    --accent-soft: rgba(37,99,235,0.10);
+    --accent-soft-strong: rgba(37,99,235,0.22);
+
+    --border-color: rgba(15,23,42,0.14);
+
+    color-scheme: light;
+}
+
+/* Transición al alternar el tema, para que el cambio no resulte brusco.
+   Se limita a color y fondo: animar todo provocaría saltos en los paneles. */
+body, .sidebar, .top-nav, .modal, .grid-container {
+    transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 * {
@@ -94,7 +164,7 @@ body {
 }
 
 .btn-secondary:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface-2);
 }
 
 .camera-list {
@@ -105,7 +175,7 @@ body {
 }
 
 .camera-item {
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--surface-1);
     border: 1px solid var(--border-color);
     margin-bottom: 8px;
     padding: 12px;
@@ -118,7 +188,7 @@ body {
 }
 
 .camera-item:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--surface-3);
     transform: translateY(-2px);
 }
 
@@ -134,7 +204,7 @@ body {
 .cam-info span {
     font-size: 12px;
     color: var(--text-muted);
-    background: rgba(0,0,0,0.3);
+    background: var(--surface-sunken);
     padding: 2px 6px;
     border-radius: 4px;
 }
@@ -148,7 +218,7 @@ body {
     font-size: 16px;
 }
 .cam-actions button:hover {
-    color: white;
+    color: var(--text-main);
 }
 
 /* Main Content */
@@ -160,7 +230,7 @@ body {
 
 .top-nav {
     padding: 10px 16px;
-    background: rgba(15, 23, 42, 0.8);
+    background: var(--nav-bg);
     backdrop-filter: blur(10px);
     border-bottom: 1px solid var(--border-color);
     display: flex;
@@ -185,14 +255,14 @@ body {
 
 /* Clear button hover - red tint */
 #clear-all-streams-btn:hover {
-    background: rgba(248, 113, 113, 0.15) !important;
+    background: rgba(248,113,113,0.15) !important;
     color: #ff5555 !important;
 }
 
 .btn-icon {
     background: none;
     border: none;
-    color: white;
+    color: var(--text-main);
     font-size: 24px;
     cursor: pointer;
     margin-right: 15px;
@@ -203,7 +273,7 @@ body {
     display: flex;
     gap: 6px;
     align-items: center;
-    background: rgba(0,0,0,0.25);
+    background: var(--surface-sunken);
     padding: 5px 8px;
     border-radius: 8px;
     border: 1px solid var(--border-color);
@@ -230,8 +300,8 @@ body {
 }
 
 .layout-btn:hover {
-    background: rgba(255,255,255,0.08);
-    color: white;
+    background: var(--surface-3);
+    color: var(--text-main);
 }
 
 .layout-btn.active {
@@ -245,7 +315,7 @@ body {
     padding: 20px;
     display: grid;
     gap: 12px;
-    background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);
+    background: radial-gradient(circle at center, var(--grid-from) 0%, var(--grid-to) 100%);
     overflow: hidden;
 }
 
@@ -280,7 +350,7 @@ body {
 }
 
 .video-cell {
-    background: rgba(0, 0, 0, 0.4);
+    background: rgba(0,0,0,0.4);
     border: 2px dashed var(--border-color);
     border-radius: 12px;
     display: flex;
@@ -293,7 +363,7 @@ body {
 
 .video-cell.drag-over {
     border-color: var(--primary);
-    background: rgba(59, 130, 246, 0.1);
+    background: var(--accent-soft);
 }
 
 .video-cell img {
@@ -321,7 +391,7 @@ body {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--scrim);
     backdrop-filter: blur(4px);
     display: flex;
     justify-content: center;
@@ -338,12 +408,12 @@ body {
 }
 
 .modal {
-    background: #1e293b;
+    background: var(--modal-bg);
     padding: 30px;
     border-radius: 12px;
     width: 400px;
     border: 1px solid var(--border-color);
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
     transform: translateY(20px);
     transition: transform 0.3s;
 }
@@ -369,8 +439,10 @@ body {
     margin-bottom: 15px;
     border-radius: 6px;
     border: 1px solid var(--border-color);
-    background: rgba(0,0,0,0.2);
-    color: white;
+    background: var(--surface-sunken);
+    /* No "white": esta regla gana en especificidad a .settings-select, y con
+       tema claro dejaba texto blanco sobre fondo blanco. */
+    color: var(--text-color);
     outline: none;
 }
 
@@ -407,7 +479,7 @@ body {
     display: inline-block;
     width: 40px;
     height: 22px;
-    background: rgba(255,255,255,0.1);
+    background: var(--surface-3);
     border-radius: 11px;
     transition: background 0.25s;
     flex-shrink: 0;
@@ -453,7 +525,7 @@ body {
     backdrop-filter: blur(10px);
     border: 1px solid var(--border-color);
     border-radius: 14px;
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 20px 50px rgba(0,0,0,0.45);
 }
 
 .login-brand {
@@ -550,7 +622,7 @@ body.is-admin .admin-only {
     align-items: center;
     gap: 8px;
     padding: 5px 10px;
-    background: rgba(0, 0, 0, 0.25);
+    background: var(--surface-sunken);
     border: 1px solid var(--border-color);
     border-radius: 8px;
     font-size: 12px;
@@ -678,7 +750,7 @@ body.is-admin .admin-only {
 
 .option-card:has(input:checked) {
     border-color: var(--primary);
-    background: rgba(59, 130, 246, 0.08);
+    background: var(--accent-soft);
 }
 
 /* Campos de formulario dentro del modal de configuración */
@@ -831,10 +903,11 @@ body.is-admin .admin-only {
 .alpr-search input {
     width: 100%;
     padding: 12px;
-    background: rgba(0,0,0,0.3);
+    background: var(--surface-sunken);
     border: 1px solid var(--border-color);
     border-radius: 8px;
-    color: white;
+    /* Campo de texto sobre superficie translúcida: debe seguir al tema */
+    color: var(--text-color);
     font-size: 16px;
     outline: none;
 }
@@ -846,7 +919,7 @@ body.is-admin .admin-only {
 .alpr-table-container {
     overflow-y: auto;
     flex: 1;
-    background: rgba(0,0,0,0.2);
+    background: var(--surface-sunken);
     border-radius: 8px;
     border: 1px solid var(--border-color);
 }
@@ -859,11 +932,11 @@ body.is-admin .admin-only {
 
 .alpr-table th, .alpr-table td {
     padding: 12px 15px;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
+    border-bottom: 1px solid var(--surface-2);
 }
 
 .alpr-table th {
-    background: rgba(255,255,255,0.05);
+    background: var(--surface-2);
     font-weight: 600;
     color: var(--text-muted);
     position: sticky;
@@ -871,7 +944,7 @@ body.is-admin .admin-only {
 }
 
 .alpr-table tr:hover {
-    background: rgba(255,255,255,0.03);
+    background: var(--surface-1);
 }
 
 .alpr-plate-badge {
@@ -994,14 +1067,14 @@ body.is-admin .admin-only {
     left: 0;
     right: 0;
     z-index: 10;
-    background: rgba(0, 0, 0, 0.65);
+    background: rgba(0,0,0,0.65);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
     padding: 6px 12px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid var(--surface-3);
     pointer-events: none;
     user-select: none;
     transition: background 0.2s;
@@ -1037,15 +1110,15 @@ body.is-admin .admin-only {
 @keyframes pulse-dot {
     0% {
         transform: scale(0.95);
-        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+        box-shadow: 0 0 0 0 rgba(16,185,129,0.7);
     }
     70% {
         transform: scale(1);
-        box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+        box-shadow: 0 0 0 6px rgba(16,185,129,0);
     }
     100% {
         transform: scale(0.95);
-        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+        box-shadow: 0 0 0 0 rgba(16,185,129,0);
     }
 }
 
@@ -1069,14 +1142,14 @@ body.is-admin .admin-only {
 
 .cam-panel-btn:hover {
     color: #ffffff;
-    background: rgba(255, 255, 255, 0.15);
+    background: var(--surface-4);
 }
 
 .ptz-badge {
     font-size: 0.7rem;
-    background: rgba(59, 130, 246, 0.25);
+    background: var(--accent-soft-strong);
     color: #60a5fa;
-    border: 1px solid rgba(59, 130, 246, 0.4);
+    border: 1px solid rgba(59,130,246,0.4);
     padding: 1px 5px;
     border-radius: 4px;
     font-weight: 600;
@@ -1096,16 +1169,16 @@ body.is-admin .admin-only {
     position: absolute;
     top: 45px;
     right: 12px;
-    background: rgba(15, 23, 42, 0.85);
+    background: rgba(15,23,42,0.85);
     color: #60a5fa;
-    border: 1px solid rgba(96, 165, 250, 0.4);
+    border: 1px solid rgba(96,165,250,0.4);
     padding: 4px 10px;
     border-radius: 6px;
     font-size: 0.85rem;
     font-weight: 600;
     pointer-events: none;
     z-index: 20;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
     animation: zoom-pop 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 

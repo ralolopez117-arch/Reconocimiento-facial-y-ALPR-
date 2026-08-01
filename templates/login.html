@@ -1,6 +1,14 @@
 <!DOCTYPE html>
-<html lang="es">
+<!-- Antes de iniciar sesión no se sabe qué usuario es, así que no hay
+     preferencia que aplicar. Se sigue el tema del sistema operativo. -->
+<html lang="es" data-theme="dark" id="login-html">
 <head>
+    <script>
+        // Se ejecuta antes de pintar para evitar un destello del tema contrario
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+            document.getElementById('login-html').dataset.theme = 'light';
+        }
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Iniciar sesión — Monitoreo Inteligente</title>

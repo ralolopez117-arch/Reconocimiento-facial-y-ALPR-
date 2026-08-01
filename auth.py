@@ -142,6 +142,82 @@ def init_users():
     conn.close()
 
 
+# ---------------------------------------------------------------------------
+# Preferencias por usuario
+#
+# A diferencia de los ajustes de config.json, que son globales y afectan a todo
+# el sistema, estas preferencias son de cada cuenta: dos personas conectadas a
+# la vez pueden ver la interfaz con temas distintos.
+# ---------------------------------------------------------------------------
+THEME_DARK = "dark"
+THEME_LIGHT = "light"
+VALID_THEMES = (THEME_DARK, THEME_LIGHT)
+
+DEFAULT_PREFERENCES = {"theme": THEME_DARK}
+
+
+def init_preferences():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_preferences (
+            user_id INTEGER PRIMARY KEY,
+            theme TEXT NOT NULL DEFAULT 'dark'
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+
+def get_preferences(user_id: int) -> dict:
+    """
+    Preferencias del usuario, completadas con los valores por defecto.
+
+    Un usuario que nunca haya tocado la personalización no tiene fila propia;
+    en ese caso se devuelven los valores por defecto sin crearla.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT theme FROM user_preferences WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row is None:
+        return dict(DEFAULT_PREFERENCES)
+    return {**DEFAULT_PREFERENCES, "theme": row["theme"]}
+
+
+def save_preferences(user_id: int, theme: str):
+    """
+    Guarda las preferencias del usuario.
+
+    Returns:
+        error (str) o None si fue bien.
+    """
+    if theme not in VALID_THEMES:
+        return f"Tema no válido: {theme}"
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    # UPSERT: la fila puede no existir todavía si es la primera vez que el
+    # usuario cambia algo de la personalización.
+    cursor.execute('''
+        INSERT INTO user_preferences (user_id, theme) VALUES (?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET theme = excluded.theme
+    ''', (user_id, theme))
+    conn.commit()
+    conn.close()
+    return None
+
+
+def delete_preferences(user_id: int):
+    """Elimina las preferencias de un usuario borrado, para no dejar huérfanas."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM user_preferences WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
 def get_user_by_name(username: str):
     """Busca un usuario por nombre, sin distinguir mayúsculas."""
     conn = get_connection()
@@ -246,6 +322,9 @@ def delete_user(user_id: int):
     cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
     conn.commit()
     conn.close()
+    # Sin esto, las preferencias quedarían huérfanas y un usuario nuevo podría
+    # heredarlas al reutilizarse el identificador.
+    delete_preferences(user_id)
     return None
 
 

@@ -519,6 +519,50 @@ function setupToggle(checkboxId, settingKey) {
     });
 }
 
+// ---- Personalización por usuario ----
+// El tema ya viene aplicado en el HTML que envía el servidor; aquí solo se
+// sincroniza el interruptor y se guarda al cambiarlo.
+
+function currentTheme() {
+    return document.documentElement.dataset.theme || 'dark';
+}
+
+async function fetchPreferences() {
+    const res = await fetch('/api/preferences');
+    if (!res.ok) return;
+    const prefs = await res.json();
+    applyTheme(prefs.theme);
+    document.getElementById('toggle-dark-mode').checked = prefs.theme === 'dark';
+}
+
+function applyTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+}
+
+async function saveTheme(theme) {
+    const anterior = currentTheme();
+    // Se aplica antes de la respuesta para que el cambio se vea inmediato
+    applyTheme(theme);
+
+    const res = await fetch('/api/preferences', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme })
+    });
+
+    if (!res.ok) {
+        // No se pudo guardar: se revierte para no mostrar un estado que el
+        // servidor no tiene, y que se perdería al recargar.
+        applyTheme(anterior);
+        document.getElementById('toggle-dark-mode').checked = anterior === 'dark';
+        showToast('No se pudo guardar la preferencia de tema.');
+    }
+}
+
+document.getElementById('toggle-dark-mode').addEventListener('change', (e) => {
+    saveTheme(e.target.checked ? 'dark' : 'light');
+});
+
 // ---- Modal de Configuración ----
 // Agrupa el modo de detección y las superposiciones de video, que antes vivían
 // en un panel fijo al pie de la barra lateral.
@@ -527,6 +571,7 @@ document.getElementById('open-settings-btn').addEventListener('click', () => {
     // Releer del servidor al abrir: los ajustes pueden haber cambiado desde
     // otra pestaña o desde otro equipo en modo remoto.
     fetchDisplaySettings();
+    fetchPreferences();
     if (IS_ADMIN) {
         fetchDetectionSettings();
         fetchAlprSettings();

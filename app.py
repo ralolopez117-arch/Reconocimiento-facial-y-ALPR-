@@ -25,6 +25,7 @@ app.secret_key = auth.get_secret_key()
 app.permanent_session_lifetime = datetime.timedelta(days=7)
 
 auth.init_users()
+auth.init_preferences()
 
 # Start background processor manager
 background_manager.start()
@@ -103,11 +104,40 @@ def get_session_info():
     })
 
 
+@app.route('/api/preferences', methods=['GET'])
+@login_required
+def get_preferences():
+    """Personalización del usuario en sesión. Cada cuenta tiene la suya."""
+    return jsonify(auth.get_preferences(session['user_id']))
+
+@app.route('/api/preferences', methods=['PUT'])
+@login_required
+def update_preferences():
+    """
+    Guarda la personalización del usuario en sesión.
+
+    No lleva admin_required a propósito: es preferencia personal, no
+    configuración del sistema, así que un operador también puede cambiarla.
+    Siempre se aplica al usuario de la sesión, nunca a otro.
+    """
+    data = request.json or {}
+    current = auth.get_preferences(session['user_id'])
+    error = auth.save_preferences(session['user_id'],
+                                  data.get('theme', current['theme']))
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+    return jsonify({'status': 'success', **auth.get_preferences(session['user_id'])})
+
+
 @app.route('/')
 @login_required
 def index():
     user = auth.current_user()
-    return render_template('index.html', user=user, is_admin=auth.is_admin())
+    # El tema se inyecta en el HTML para que la página nazca ya con él y no
+    # haya un destello del tema anterior mientras carga el JavaScript.
+    prefs = auth.get_preferences(session['user_id'])
+    return render_template('index.html', user=user, is_admin=auth.is_admin(),
+                           theme=prefs['theme'])
 
 @app.route('/api/users', methods=['GET'])
 @admin_required

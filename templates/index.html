@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es" data-theme="{{ theme }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -364,8 +364,22 @@
             <!-- Tab: Superposiciones -->
             <div id="settings-tab-display" class="fr-tab-content active">
                 <p class="settings-hint">
-                    Elige qué información se dibuja sobre el video. Los cambios se aplican
-                    de inmediato en las cámaras activas.
+                    <strong>Personalización</strong> — solo afecta a tu cuenta.
+                </p>
+                <label class="toggle-row settings-toggle">
+                    <span class="option-body">
+                        <strong>Modo oscuro</strong>
+                        <small>Desactívalo para usar el tema claro. Se recuerda para tu
+                               usuario y no afecta a los demás.</small>
+                    </span>
+                    <input type="checkbox" id="toggle-dark-mode">
+                    <span class="toggle-slider"></span>
+                </label>
+
+                <p class="settings-hint" style="margin-top: 20px;">
+                    <strong>Superposiciones de video</strong> — qué se dibuja sobre la
+                    imagen. Se aplican de inmediato en las cámaras activas y, al estar
+                    grabadas en el propio video, son <em>comunes a todos los usuarios</em>.
                 </p>
                 <label class="toggle-row settings-toggle">
                     <span class="option-body">
