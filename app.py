@@ -1,6 +1,10 @@
 import uuid
 from flask import Flask, render_template, Response, request, jsonify
-from config_manager import load_config, save_config, get_display_settings, save_display_settings, get_detection_mode, save_detection_mode
+from config_manager import (load_config, save_config, get_display_settings,
+                            save_display_settings, get_detection_mode,
+                            save_detection_mode, get_alpr_settings,
+                            save_alpr_settings)
+from plate_format import PLATE_PATTERNS, list_formats
 from streamer import generate_frames
 import database
 from background_processor import background_manager
@@ -96,6 +100,51 @@ def update_detection_settings():
         background_manager.set_mode(mode)
         return jsonify({"status": "success", "detection_mode": mode})
     return jsonify({"status": "error", "message": "Invalid detection mode"}), 400
+
+@app.route('/api/alpr_settings', methods=['GET'])
+def get_alpr_config():
+    """Ajustes actuales del lector de matrículas y formatos disponibles."""
+    return jsonify({
+        **get_alpr_settings(),
+        "available_formats": list_formats(),
+    })
+
+@app.route('/api/alpr_settings', methods=['PUT'])
+def update_alpr_config():
+    """
+    Cambia el formato de matrícula que se exige al validar una lectura.
+
+    Solo se aceptan claves conocidas: una expresión regular arbitraria enviada
+    desde el navegador podría desactivar la validación por completo o provocar
+    un coste de evaluación desmedido.
+    """
+    data = request.json or {}
+    current = get_alpr_settings()
+
+    plate_format = data.get("plate_format", current["plate_format"])
+    if plate_format not in PLATE_PATTERNS:
+        return jsonify({
+            "status": "error",
+            "message": f"Formato de placa no válido: {plate_format}",
+        }), 400
+
+    min_confidence = data.get("min_confidence", current["min_confidence"])
+    try:
+        min_confidence = float(min_confidence)
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Confianza no numérica"}), 400
+    if not 0.0 <= min_confidence <= 1.0:
+        return jsonify({
+            "status": "error",
+            "message": "La confianza debe estar entre 0 y 1",
+        }), 400
+
+    save_alpr_settings({
+        "plate_format": plate_format,
+        "min_confidence": min_confidence,
+    })
+    return jsonify({"status": "success", "plate_format": plate_format,
+                    "min_confidence": min_confidence})
 
 # --- ONVIF PTZ REST Endpoints ---
 def _find_camera_by_id(cam_id):

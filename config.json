@@ -35,5 +35,9 @@
         "show_labels": true,
         "show_speed": false
     },
-    "detection_mode": "monitored"
+    "detection_mode": "monitored",
+    "alpr_settings": {
+        "plate_format": "co",
+        "min_confidence": 0.5
+    }
 }

@@ -44,6 +44,28 @@ def save_display_settings(settings):
     config["display_settings"] = settings
     save_config(config)
 
+def get_alpr_settings():
+    """
+    Configuración del motor de matrículas.
+
+    plate_format:   clave de plate_format.PLATE_PATTERNS ("generic", "mx",
+                    "us", "es", "ar", "co", "cl", "pe") o una expresión
+                    regular propia. "generic" acepta 4-8 alfanuméricos con al
+                    menos un dígito, adecuado si se vigilan varios países.
+    min_confidence: confianza mínima del OCR para considerar un texto.
+    """
+    config = load_config()
+    defaults = {"plate_format": "generic", "min_confidence": 0.5}
+    stored = config.get("alpr_settings", {})
+    return {**defaults, **stored}
+
+
+def save_alpr_settings(settings):
+    config = load_config()
+    config["alpr_settings"] = settings
+    save_config(config)
+
+
 def get_detection_mode():
     config = load_config()
     return config.get("detection_mode", "monitored")

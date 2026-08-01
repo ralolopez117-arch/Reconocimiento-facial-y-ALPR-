@@ -1,7 +1,8 @@
 import easyocr
-import re
 from database import insert_plate, check_plate_against_watchlist, insert_plate_alert
 from ultralytics import YOLO
+from plate_format import normalize, select_best_plate
+from config_manager import get_alpr_settings
 import os
 
 # Initialize models
@@ -16,15 +17,19 @@ def clean_plate_text(text):
     """
     Cleans the detected text. Keeps alphanumeric and uppercase.
     """
-    cleaned = re.sub(r'[^A-Za-z0-9]', '', text)
-    return cleaned.upper()
+    return normalize(text)
 
-def process_plate_image(vehicle_crop, camera_id, confidence_threshold=0.5):
+def process_plate_image(vehicle_crop, camera_id, confidence_threshold=None):
     """
     Process a cropped image of a vehicle.
     1. Uses YOLO to find the plate inside the vehicle.
     2. Crops the plate.
     3. Uses EasyOCR on the tiny plate crop.
+    4. Valida el formato y se queda solo con el mejor candidato.
+
+    Dentro del recorte de una placa, EasyOCR devuelve varias regiones: el
+    número, el nombre del estado, el lema y el marco del concesionario. Un
+    vehículo tiene una sola matrícula, así que se registra como mucho una.
     """
     try:
         detected_plates = []
@@ -57,20 +62,33 @@ def process_plate_image(vehicle_crop, camera_id, confidence_threshold=0.5):
 
         # Step 2: Read text with EasyOCR
         ocr_results = reader.readtext(plate_crop)
-        
-        for (bbox, text, prob) in ocr_results:
-            cleaned_text = clean_plate_text(text)
-            
-            if len(cleaned_text) >= 4 and prob >= confidence_threshold:
-                insert_plate(camera_id, cleaned_text, prob)
-                detected_plates.append((cleaned_text, prob))
-                
-                # Check watchlist — trigger alert if matched
-                match = check_plate_against_watchlist(cleaned_text)
-                if match:
-                    insert_plate_alert(camera_id, cleaned_text, match['plate_pattern'], prob)
-                    print(f"[PLATE ALERT] Placa vigilada detectada: {cleaned_text} | Cámara: {camera_id}")
-                
+
+        # Step 3: quedarse con el único candidato que parece una matrícula.
+        # Descarta palabras del marco del concesionario y nombres de estado, y
+        # exige el formato del país configurado.
+        settings = get_alpr_settings()
+        min_conf = confidence_threshold if confidence_threshold is not None \
+            else settings.get("min_confidence", 0.5)
+
+        best = select_best_plate(
+            ocr_results,
+            plate_crop.shape,
+            min_confidence=min_conf,
+            pattern_key=settings.get("plate_format", "generic"),
+        )
+        if best is None:
+            return []
+
+        cleaned_text, prob = best
+        insert_plate(camera_id, cleaned_text, prob)
+        detected_plates.append((cleaned_text, prob))
+
+        # Check watchlist — trigger alert if matched
+        match = check_plate_against_watchlist(cleaned_text)
+        if match:
+            insert_plate_alert(camera_id, cleaned_text, match['plate_pattern'], prob)
+            print(f"[PLATE ALERT] Placa vigilada detectada: {cleaned_text} | Cámara: {camera_id}")
+
         return detected_plates
     except Exception as e:
         print(f"ALPR Error: {e}")

@@ -18,38 +18,6 @@
         <ul class="camera-list" id="camera-list">
             <!-- Cameras injected via JS -->
         </ul>
-
-        <!-- Display & Detection Settings Panel -->
-        <div class="display-settings-panel">
-            <h3 class="display-settings-title">⚙ Modo de Detección</h3>
-            <div class="detection-mode-selector" style="margin-bottom: 14px; display: flex; flex-direction: column; gap: 8px;">
-                <label class="radio-row" style="font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
-                    <input type="radio" name="detection_mode" value="monitored" id="mode-monitored" checked>
-                    <span>🔘 <strong>Modo Pantalla:</strong> Detectar solo en cámaras visibles</span>
-                </label>
-                <label class="radio-row" style="font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 8px;">
-                    <input type="radio" name="detection_mode" value="all" id="mode-all">
-                    <span>🔘 <strong>Modo Total:</strong> Detectar en todas las cámaras (Segundo plano)</span>
-                </label>
-            </div>
-
-            <h3 class="display-settings-title">⚙ Visualización</h3>
-            <label class="toggle-row">
-                <span>FPS</span>
-                <input type="checkbox" id="toggle-fps" checked>
-                <span class="toggle-slider"></span>
-            </label>
-            <label class="toggle-row">
-                <span>Etiquetas / Objetos</span>
-                <input type="checkbox" id="toggle-labels" checked>
-                <span class="toggle-slider"></span>
-            </label>
-            <label class="toggle-row">
-                <span>Velocidad estimada</span>
-                <input type="checkbox" id="toggle-speed" checked>
-                <span class="toggle-slider"></span>
-            </label>
-        </div>
     </aside>
 
     <!-- Main Grid -->
@@ -60,6 +28,7 @@
             <!-- Compact icon-only buttons for FR and ALPR -->
             <button id="open-fr-btn" class="btn-secondary" title="Reconocimiento Facial" style="padding: 7px 10px; white-space: nowrap;">👤 <span class="nav-label">Reconocimiento Facial</span></button>
             <button id="open-alpr-btn" class="btn-secondary" title="Placas (ALPR)" style="padding: 7px 10px; white-space: nowrap;">🚗 <span class="nav-label">Placas (ALPR)</span></button>
+            <button id="open-settings-btn" class="btn-secondary" title="Configuración" style="padding: 7px 10px; white-space: nowrap;">⚙ <span class="nav-label">Configuración</span></button>
             <!-- Layout selector + clear button -->
             <div style="display:flex; align-items:center; gap:5px; background: rgba(0,0,0,0.25); padding: 4px 6px; border-radius: 8px; border: 1px solid var(--border-color); flex-shrink: 0;">
                 <button class="layout-btn" data-layout="1" title="1 Cámara">
@@ -294,6 +263,108 @@
                         </tbody>
                     </table>
                 </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Settings Dashboard Modal -->
+    <div class="modal-overlay" id="settings-modal-overlay">
+        <div class="modal alpr-modal">
+            <div class="alpr-header">
+                <h3>⚙ Configuración</h3>
+                <button id="settings-close" class="btn-icon">×</button>
+            </div>
+
+            <!-- Tabs -->
+            <div class="fr-tabs">
+                <button class="fr-tab active" data-tab="settings-tab-detection">🎯 Detección</button>
+                <button class="fr-tab" data-tab="settings-tab-plates">🚗 Placas</button>
+                <button class="fr-tab" data-tab="settings-tab-display">👁 Visualización</button>
+            </div>
+
+            <!-- Tab: Modo de detección -->
+            <div id="settings-tab-detection" class="fr-tab-content active">
+                <p class="settings-hint">
+                    Define en qué cámaras se ejecutan la detección de objetos, la lectura
+                    de matrículas y el reconocimiento facial.
+                </p>
+                <label class="option-card">
+                    <input type="radio" name="detection_mode" value="monitored" id="mode-monitored" checked>
+                    <span class="option-mark"></span>
+                    <span class="option-body">
+                        <strong>Modo Pantalla</strong>
+                        <small>Detectar solo en las cámaras visibles en la cuadrícula. Menor consumo de CPU.</small>
+                    </span>
+                </label>
+                <label class="option-card">
+                    <input type="radio" name="detection_mode" value="all" id="mode-all">
+                    <span class="option-mark"></span>
+                    <span class="option-body">
+                        <strong>Modo Total</strong>
+                        <small>Detectar en todas las cámaras registradas, incluso sin mostrarlas en pantalla. Mayor consumo de CPU.</small>
+                    </span>
+                </label>
+            </div>
+
+            <!-- Tab: Formato de placas -->
+            <div id="settings-tab-plates" class="fr-tab-content">
+                <p class="settings-hint">
+                    Elige el país de tus cámaras. El lector descartará cualquier texto
+                    que no encaje con el formato de matrícula de ese país, evitando que
+                    se registren nombres de concesionario, lemas o rótulos.
+                </p>
+
+                <label class="settings-field-label" for="alpr-format-select">País / Formato de matrícula</label>
+                <select id="alpr-format-select" class="settings-select">
+                    <!-- Opciones inyectadas por JS desde /api/alpr_settings -->
+                </select>
+                <p id="alpr-format-desc" class="settings-field-desc"></p>
+
+                <label class="settings-field-label" for="alpr-confidence-range" style="margin-top: 18px;">
+                    Confianza mínima de lectura
+                    <span id="alpr-confidence-value" class="settings-field-value">50%</span>
+                </label>
+                <input type="range" id="alpr-confidence-range" class="settings-range"
+                       min="10" max="95" step="5" value="50">
+                <p class="settings-field-desc">
+                    Cuánta seguridad debe tener el lector para aceptar un texto. Más alto
+                    reduce lecturas erróneas, pero puede perder matrículas lejanas o borrosas.
+                </p>
+
+                <div id="alpr-settings-msg" class="settings-msg"></div>
+            </div>
+
+            <!-- Tab: Superposiciones -->
+            <div id="settings-tab-display" class="fr-tab-content">
+                <p class="settings-hint">
+                    Elige qué información se dibuja sobre el video. Los cambios se aplican
+                    de inmediato en las cámaras activas.
+                </p>
+                <label class="toggle-row settings-toggle">
+                    <span class="option-body">
+                        <strong>FPS</strong>
+                        <small>Fotogramas por segundo en la esquina superior.</small>
+                    </span>
+                    <input type="checkbox" id="toggle-fps" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+                <label class="toggle-row settings-toggle">
+                    <span class="option-body">
+                        <strong>Etiquetas / Objetos</strong>
+                        <small>Recuadros de detección con clase, identificador y confianza.</small>
+                    </span>
+                    <input type="checkbox" id="toggle-labels" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+                <label class="toggle-row settings-toggle">
+                    <span class="option-body">
+                        <strong>Velocidad estimada</strong>
+                        <small>Velocidad aproximada en km/h bajo cada objeto en movimiento.</small>
+                    </span>
+                    <input type="checkbox" id="toggle-speed" checked>
+                    <span class="toggle-slider"></span>
+                </label>
             </div>
 
         </div>

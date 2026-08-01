@@ -6,6 +6,21 @@
     --primary-hover: #2563eb;
     --text-main: #f8fafc;
     --text-muted: #94a3b8;
+
+    /* Superficie de tarjetas y campos dentro de los paneles. Un tono por
+       encima del fondo para que se despeguen del modal. */
+    --bg-card: #1e293b;
+
+    /* Alias de --text-main. Varias reglas y estilos en línea ya usaban este
+       nombre sin que estuviera declarado, dejando el texto sin color propio. */
+    --text-color: #f8fafc;
+
+    /* Indica al navegador que la interfaz es oscura, para que dibuje los
+       controles nativos en consecuencia: la lista desplegable de los <select>,
+       las barras de desplazamiento y los cursores de los campos. Sin esto, el
+       desplegable de países se abría con el tema claro del sistema y quedaba
+       texto casi blanco sobre fondo casi blanco. */
+    color-scheme: dark;
 }
 
 * {
@@ -370,22 +385,6 @@ body {
     margin-top: 10px;
 }
 
-/* Display Settings Panel */
-.display-settings-panel {
-    padding: 16px;
-    border-top: 1px solid var(--border-color);
-    margin-top: auto;
-}
-
-.display-settings-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 14px;
-}
-
 /* Toggle row */
 .toggle-row {
     display: flex;
@@ -433,6 +432,219 @@ body {
 .toggle-row input:checked + .toggle-slider::after {
     transform: translateX(18px);
     background: white;
+}
+
+/* ---- Modal de Configuración ---- */
+
+/* Texto explicativo al inicio de cada pestaña */
+.settings-hint {
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin: 0 0 16px;
+}
+
+/* Descripción de una opción: título en negrita sobre una línea de ayuda */
+.option-body {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;    /* Permite que el texto se ajuste dentro de un flex */
+}
+
+.option-body strong {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.option-body small {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.45;
+}
+
+/* Tarjeta seleccionable para opciones excluyentes (radio) */
+.option-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.option-card:hover {
+    border-color: var(--primary);
+}
+
+/* El radio nativo se oculta; el estado se dibuja en .option-mark */
+.option-card input[type="radio"] {
+    display: none;
+}
+
+.option-mark {
+    position: relative;
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    margin-top: 2px;
+    border: 2px solid var(--text-muted);
+    border-radius: 50%;
+    transition: border-color 0.2s;
+}
+
+.option-mark::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 9px;
+    height: 9px;
+    background: var(--primary);
+    border-radius: 50%;
+    transform: translate(-50%, -50%) scale(0);
+    transition: transform 0.2s;
+}
+
+.option-card input:checked ~ .option-mark {
+    border-color: var(--primary);
+}
+
+.option-card input:checked ~ .option-mark::after {
+    transform: translate(-50%, -50%) scale(1);
+}
+
+.option-card:has(input:checked) {
+    border-color: var(--primary);
+    background: rgba(59, 130, 246, 0.08);
+}
+
+/* Campos de formulario dentro del modal de configuración */
+.settings-field-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-main);
+    margin-bottom: 8px;
+}
+
+/* Valor actual mostrado junto a la etiqueta, p. ej. el % del deslizador */
+.settings-field-value {
+    font-weight: 600;
+    color: var(--primary);
+    font-variant-numeric: tabular-nums;   /* Evita que el ancho baile al cambiar */
+}
+
+.settings-field-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin: 8px 0 0;
+}
+
+.settings-select {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 14px;
+    color: var(--text-color);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+
+.settings-select:hover,
+.settings-select:focus {
+    border-color: var(--primary);
+}
+
+/* La lista desplegable la dibuja el sistema y no hereda los colores del
+   <select>, así que hay que darle color explícito a cada fila. Junto con
+   color-scheme: dark, evita el texto claro sobre fondo claro. */
+.settings-select option {
+    background-color: var(--bg-card);
+    color: var(--text-color);
+    padding: 6px 8px;
+}
+
+/* Cabecera de cada región (América, Europa) dentro del desplegable */
+.settings-select optgroup {
+    background-color: var(--bg-color);
+    color: var(--text-muted);
+    font-style: normal;
+    font-weight: 600;
+}
+
+.settings-range {
+    width: 100%;
+    height: 6px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    outline: none;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+/* El pulgar del deslizador necesita reglas separadas por motor: una lista
+   combinada haría que ambos navegadores descartaran la regla entera. */
+.settings-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    background: var(--primary);
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.settings-range::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    background: var(--primary);
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+/* Confirmación tras guardar; se desvanece sin mover el contenido */
+.settings-msg {
+    min-height: 18px;
+    margin-top: 14px;
+    font-size: 13px;
+    color: #4ade80;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.settings-msg.visible {
+    opacity: 1;
+}
+
+/* Interruptor con descripción, dentro del modal de configuración */
+.toggle-row.settings-toggle {
+    align-items: flex-start;
+    gap: 16px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+
+.toggle-row.settings-toggle .toggle-slider {
+    margin-top: 2px;
 }
 
 /* ALPR Dashboard Styles */

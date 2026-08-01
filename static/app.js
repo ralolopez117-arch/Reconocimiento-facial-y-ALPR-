@@ -486,6 +486,110 @@ function setupToggle(checkboxId, settingKey) {
     });
 }
 
+// ---- Modal de Configuración ----
+// Agrupa el modo de detección y las superposiciones de video, que antes vivían
+// en un panel fijo al pie de la barra lateral.
+
+document.getElementById('open-settings-btn').addEventListener('click', () => {
+    // Releer del servidor al abrir: los ajustes pueden haber cambiado desde
+    // otra pestaña o desde otro equipo en modo remoto.
+    fetchDisplaySettings();
+    fetchDetectionSettings();
+    fetchAlprSettings();
+    document.getElementById('settings-modal-overlay').classList.add('active');
+});
+
+document.getElementById('settings-close').addEventListener('click', () => {
+    document.getElementById('settings-modal-overlay').classList.remove('active');
+});
+
+// Cerrar al pulsar fuera del cuadro, como en los demás paneles
+document.getElementById('settings-modal-overlay').addEventListener('click', (e) => {
+    if (e.target.id === 'settings-modal-overlay') {
+        e.currentTarget.classList.remove('active');
+    }
+});
+
+// ---- Formato de matrícula por país ----
+// Los formatos los define el servidor (plate_format.py), de modo que añadir un
+// país nuevo no exige tocar el frontend.
+
+let alprFormats = [];
+
+async function fetchAlprSettings() {
+    const res = await fetch('/api/alpr_settings');
+    const data = await res.json();
+    alprFormats = data.available_formats || [];
+
+    // Agrupar por región (América, Europa...) para que la lista sea navegable.
+    // Se respeta el orden que envía el servidor en lugar de reordenar aquí.
+    const select = document.getElementById('alpr-format-select');
+    select.innerHTML = '';
+    const grupos = new Map();
+    alprFormats.forEach(fmt => {
+        const region = fmt.region || 'Otros';
+        if (!grupos.has(region)) {
+            const grupo = document.createElement('optgroup');
+            grupo.label = region;
+            grupos.set(region, grupo);
+            select.appendChild(grupo);
+        }
+        const opt = document.createElement('option');
+        opt.value = fmt.key;
+        opt.textContent = `${fmt.name} — ${fmt.example}`;
+        grupos.get(region).appendChild(opt);
+    });
+    select.value = data.plate_format;
+    updateFormatDescription();
+
+    const pct = Math.round((data.min_confidence ?? 0.5) * 100);
+    document.getElementById('alpr-confidence-range').value = pct;
+    document.getElementById('alpr-confidence-value').textContent = `${pct}%`;
+}
+
+function updateFormatDescription() {
+    const key = document.getElementById('alpr-format-select').value;
+    const fmt = alprFormats.find(f => f.key === key);
+    document.getElementById('alpr-format-desc').textContent = fmt ? fmt.description : '';
+}
+
+async function saveAlprSettings() {
+    const plate_format = document.getElementById('alpr-format-select').value;
+    const min_confidence = parseInt(document.getElementById('alpr-confidence-range').value, 10) / 100;
+
+    const res = await fetch('/api/alpr_settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plate_format, min_confidence })
+    });
+
+    const msg = document.getElementById('alpr-settings-msg');
+    if (res.ok) {
+        const fmt = alprFormats.find(f => f.key === plate_format);
+        msg.textContent = `✔ Formato aplicado: ${fmt ? fmt.name : plate_format}`;
+        msg.style.color = '#4ade80';
+    } else {
+        const err = await res.json().catch(() => ({}));
+        msg.textContent = `✖ ${err.message || 'No se pudo guardar'}`;
+        msg.style.color = '#f87171';
+    }
+    msg.classList.add('visible');
+    clearTimeout(saveAlprSettings._timer);
+    saveAlprSettings._timer = setTimeout(() => msg.classList.remove('visible'), 2500);
+}
+
+document.getElementById('alpr-format-select').addEventListener('change', () => {
+    updateFormatDescription();
+    saveAlprSettings();
+});
+
+// El deslizador actualiza la etiqueta de forma continua, pero solo guarda al
+// soltarlo: guardar en cada píxel de arrastre generaría decenas de escrituras.
+document.getElementById('alpr-confidence-range').addEventListener('input', (e) => {
+    document.getElementById('alpr-confidence-value').textContent = `${e.target.value}%`;
+});
+document.getElementById('alpr-confidence-range').addEventListener('change', saveAlprSettings);
+
 // ---- ALPR Dashboard ----
 let alprPollInterval = null;
 

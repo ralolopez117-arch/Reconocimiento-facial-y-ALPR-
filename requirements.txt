@@ -1,6 +1,27 @@
+# Detección y seguimiento
 ultralytics
 supervision
 opencv-python
+numpy
+
+# Servidor web (modo escritorio y modo remoto)
 Flask
+waitress
+
+# Ventana nativa del modo escritorio.
+# En Windows usa el WebView2 de Edge, ya presente en Windows 10/11.
+pywebview
+
+# Lectura de matrículas (ALPR)
 easyocr
+
+# Reconocimiento facial (MTCNN + InceptionResnetV1)
 facenet-pytorch
+Pillow
+
+# Control PTZ por ONVIF sobre HTTP
+requests
+
+# Solo para la interfaz de escritorio antigua en gui.py / main.py.
+# La versión de escritorio actual es desktop.py y no la necesita.
+PyQt6
