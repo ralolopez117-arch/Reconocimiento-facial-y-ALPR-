@@ -7,6 +7,10 @@ alpr_data.db
 # Fotos de rostros registrados
 static/faces/
 
+# Clave con la que Flask firma las cookies de sesión.
+# Es un secreto por instalación y nunca debe compartirse.
+.flask_secret
+
 # Entornos virtuales
 venv/
 .venv/

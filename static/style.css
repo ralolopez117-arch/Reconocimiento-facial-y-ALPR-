@@ -434,6 +434,163 @@ body {
     background: white;
 }
 
+/* ---- Pantalla de inicio de sesión ---- */
+.login-body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 20px;
+    /* Degradado suave para separar visualmente el acceso del panel operativo */
+    background: radial-gradient(ellipse at top, #1e293b 0%, var(--bg-color) 60%);
+}
+
+.login-card {
+    width: 100%;
+    max-width: 380px;
+    padding: 36px 32px 28px;
+    background: var(--panel-bg);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+}
+
+.login-brand {
+    text-align: center;
+    margin-bottom: 26px;
+}
+
+.login-logo {
+    font-size: 40px;
+    line-height: 1;
+    margin-bottom: 12px;
+}
+
+.login-brand h1 {
+    font-size: 19px;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.login-brand p {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.login-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.login-card input[type="text"],
+.login-card input[type="password"] {
+    width: 100%;
+    padding: 11px 13px;
+    margin-bottom: 16px;
+    font-size: 14px;
+    color: var(--text-color);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.login-card input:focus {
+    border-color: var(--primary);
+}
+
+.login-submit {
+    width: 100%;
+    padding: 11px;
+    font-size: 14px;
+    font-weight: 600;
+    margin-top: 4px;
+}
+
+.login-submit:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+/* Reserva su altura desde el principio para que el formulario no salte
+   cuando aparece un error */
+.login-error {
+    min-height: 20px;
+    margin-top: 14px;
+    font-size: 13px;
+    text-align: center;
+    color: #f87171;
+    opacity: 0;
+    transition: opacity 0.25s;
+}
+
+.login-error.visible {
+    opacity: 1;
+}
+
+/* ---- Barra de usuario y control de acceso ---- */
+
+/* Elementos que solo ve un administrador. La clase la retira app.js según el
+   rol; de partida están ocultos para que un operador no los llegue a ver
+   parpadear durante la carga. */
+.admin-only {
+    display: none !important;
+}
+
+body.is-admin .admin-only {
+    display: revert !important;
+}
+
+.user-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 12px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.user-chip .user-name {
+    font-weight: 600;
+}
+
+.user-chip .user-role {
+    color: var(--text-muted);
+}
+
+.user-chip .user-role.admin {
+    color: var(--primary);
+}
+
+/* Buscador de cámaras en la barra lateral */
+.camera-search {
+    padding: 0 16px 12px;
+}
+
+.camera-search input {
+    width: 100%;
+    padding: 8px 12px;
+    font-size: 13px;
+    color: var(--text-color);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.camera-search input:focus {
+    border-color: var(--primary);
+}
+
 /* ---- Modal de Configuración ---- */
 
 /* Texto explicativo al inicio de cada pestaña */

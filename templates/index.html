@@ -7,13 +7,17 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body>
+<body class="{{ 'is-admin' if is_admin else 'is-operator' }}"
+      data-role="{{ user.role }}" data-username="{{ user.username }}">
 
     <!-- Sidebar / Camera Panel -->
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
             <h2>Mis Cámaras</h2>
-            <button id="add-camera-btn" class="btn-primary">+ Agregar</button>
+            <button id="add-camera-btn" class="btn-primary admin-only">+ Agregar</button>
+        </div>
+        <div class="camera-search">
+            <input type="text" id="camera-search-input" placeholder="🔍 Buscar cámara por nombre...">
         </div>
         <ul class="camera-list" id="camera-list">
             <!-- Cameras injected via JS -->
@@ -49,6 +53,16 @@
                 <button id="clear-all-streams-btn" title="Limpiar todos los paneles de video" class="layout-btn" style="color: #f87171; width: 30px; height: 30px;">
                     <svg viewBox="0 0 24 24" fill="currentColor" width="15" height="15"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
                 </button>
+            </div>
+
+            <!-- Usuario en sesión y salida -->
+            <div class="user-chip" title="Sesión activa">
+                <span class="user-name">{{ user.username }}</span>
+                <span class="user-role {{ 'admin' if is_admin else '' }}">
+                    {{ 'Administrador' if is_admin else 'Operador' }}
+                </span>
+                <a href="/logout" class="btn-icon" title="Cerrar sesión"
+                   style="text-decoration:none; padding: 2px 6px;">⏻</a>
             </div>
         </header>
 
@@ -118,7 +132,7 @@
             <div class="fr-tabs">
                 <button class="fr-tab active" data-tab="alpr-tab-detections">📋 Detecciones</button>
                 <button class="fr-tab" data-tab="alpr-tab-register">➕ Registrar Placa</button>
-                <button class="fr-tab" data-tab="alpr-tab-manage">⚙ Gestionar Registro</button>
+                <button class="fr-tab admin-only" data-tab="alpr-tab-manage">⚙ Gestionar Registro</button>
             </div>
 
             <!-- Tab: Detecciones Generales -->
@@ -153,6 +167,15 @@
                                 style="width: 100%; box-sizing: border-box; font-size: 1em; padding: 9px 12px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-color); outline: none; text-transform: uppercase;">
                         </div>
                         <div>
+                            <label style="display:block; font-size: 0.85em; color: var(--text-muted); margin-bottom: 6px;">
+                                Tipo de placa <span id="alpr-register-country" style="opacity: 0.7;"></span>
+                            </label>
+                            <select id="alpr-register-type" class="settings-select">
+                                <!-- Opciones inyectadas por JS según el país configurado -->
+                            </select>
+                            <p id="alpr-register-type-desc" class="settings-field-desc"></p>
+                        </div>
+                        <div>
                             <label style="display:block; font-size: 0.85em; color: var(--text-muted); margin-bottom: 6px;">Nota (Opcional)</label>
                             <input type="text" id="alpr-register-note" placeholder="Ej. Vehículo sospechoso"
                                 style="width: 100%; box-sizing: border-box; font-size: 1em; padding: 9px 12px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-color); outline: none;">
@@ -166,13 +189,14 @@
             <!-- Tab: Manage -->
             <div id="alpr-tab-manage" class="fr-tab-content">
                 <div style="display: flex; justify-content: flex-end; margin-bottom: 12px;">
-                    <button id="alpr-delete-all-btn" class="btn-danger">🗑 Eliminar Todas</button>
+                    <button id="alpr-delete-all-btn" class="btn-danger admin-only">🗑 Eliminar Todas</button>
                 </div>
                 <div class="alpr-table-container">
                     <table class="alpr-table">
                         <thead>
                             <tr>
                                 <th>Placa / Patrón</th>
+                                <th>Tipo</th>
                                 <th>Nota</th>
                                 <th>Acciones</th>
                             </tr>
@@ -198,7 +222,7 @@
             <!-- Tabs -->
             <div class="fr-tabs">
                 <button class="fr-tab active" data-tab="fr-tab-register">➕ Registrar</button>
-                <button class="fr-tab" data-tab="fr-tab-manage">⚙ Gestionar Rostros</button>
+                <button class="fr-tab admin-only" data-tab="fr-tab-manage">⚙ Gestionar Rostros</button>
                 <button class="fr-tab" data-tab="fr-tab-detections">📋 Detecciones</button>
             </div>
 
@@ -228,7 +252,7 @@
             <!-- Tab: Manage -->
             <div id="fr-tab-manage" class="fr-tab-content">
                 <div style="display: flex; justify-content: flex-end; margin-bottom: 12px;">
-                    <button id="fr-delete-all-btn" class="btn-danger">🗑 Eliminar Todos</button>
+                    <button id="fr-delete-all-btn" class="btn-danger admin-only">🗑 Eliminar Todos</button>
                 </div>
                 <div class="alpr-table-container">
                     <table class="alpr-table">
@@ -278,13 +302,15 @@
 
             <!-- Tabs -->
             <div class="fr-tabs">
-                <button class="fr-tab active" data-tab="settings-tab-detection">🎯 Detección</button>
-                <button class="fr-tab" data-tab="settings-tab-plates">🚗 Placas</button>
-                <button class="fr-tab" data-tab="settings-tab-display">👁 Visualización</button>
+                <button class="fr-tab admin-only" data-tab="settings-tab-detection">🎯 Detección</button>
+                <button class="fr-tab admin-only" data-tab="settings-tab-plates">🚗 Placas</button>
+                <button class="fr-tab active" data-tab="settings-tab-display">👁 Visualización</button>
+                <button class="fr-tab admin-only" data-tab="settings-tab-users">👥 Usuarios</button>
+                <button class="fr-tab admin-only" data-tab="settings-tab-session">🔒 Sesión</button>
             </div>
 
             <!-- Tab: Modo de detección -->
-            <div id="settings-tab-detection" class="fr-tab-content active">
+            <div id="settings-tab-detection" class="fr-tab-content">
                 <p class="settings-hint">
                     Define en qué cámaras se ejecutan la detección de objetos, la lectura
                     de matrículas y el reconocimiento facial.
@@ -336,7 +362,7 @@
             </div>
 
             <!-- Tab: Superposiciones -->
-            <div id="settings-tab-display" class="fr-tab-content">
+            <div id="settings-tab-display" class="fr-tab-content active">
                 <p class="settings-hint">
                     Elige qué información se dibuja sobre el video. Los cambios se aplican
                     de inmediato en las cámaras activas.
@@ -365,6 +391,81 @@
                     <input type="checkbox" id="toggle-speed" checked>
                     <span class="toggle-slider"></span>
                 </label>
+            </div>
+
+            <!-- Tab: Usuarios (solo administrador) -->
+            <div id="settings-tab-users" class="fr-tab-content">
+                <p class="settings-hint">
+                    Los <strong>administradores</strong> tienen acceso completo. Los
+                    <strong>operadores</strong> solo visualizan cámaras y añaden registros
+                    de rostros y placas: no pueden editar ni eliminar nada, ni cambiar el
+                    país ni el modo de detección.
+                </p>
+
+                <form id="user-create-form" style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-bottom:16px;">
+                    <div style="flex:1 1 140px;">
+                        <label class="settings-field-label" for="user-new-name">Usuario</label>
+                        <input type="text" id="user-new-name" required placeholder="Nombre de usuario"
+                               style="width:100%; box-sizing:border-box; padding:9px 12px; background:var(--bg-card); border:1px solid var(--border-color); border-radius:6px; color:var(--text-color); outline:none;">
+                    </div>
+                    <div style="flex:1 1 140px;">
+                        <label class="settings-field-label" for="user-new-password">Contraseña</label>
+                        <input type="password" id="user-new-password" required placeholder="Contraseña"
+                               style="width:100%; box-sizing:border-box; padding:9px 12px; background:var(--bg-card); border:1px solid var(--border-color); border-radius:6px; color:var(--text-color); outline:none;">
+                    </div>
+                    <div style="flex:0 1 150px;">
+                        <label class="settings-field-label" for="user-new-role">Rol</label>
+                        <select id="user-new-role" class="settings-select">
+                            <option value="operador">Operador</option>
+                            <option value="admin">Administrador</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn-primary" style="padding:9px 18px;">➕ Crear</button>
+                </form>
+
+                <div id="user-create-msg" class="settings-msg"></div>
+
+                <div class="alpr-table-container">
+                    <table class="alpr-table">
+                        <thead>
+                            <tr>
+                                <th>Usuario</th>
+                                <th>Rol</th>
+                                <th>Creado</th>
+                                <th style="text-align:right;">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table-body">
+                            <!-- Filled by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Tab: Sesión (solo administrador) -->
+            <div id="settings-tab-session" class="fr-tab-content">
+                <p class="settings-hint">
+                    La sesión se cierra tras este tiempo <strong>sin visualizar ninguna
+                    cámara</strong>. Mientras haya un stream abierto en la cuadrícula, la
+                    sesión no caduca por mucho tiempo que pase.
+                </p>
+
+                <label class="settings-field-label" for="session-timeout-range">
+                    Tiempo sin visualización antes de cerrar sesión
+                    <span id="session-timeout-value" class="settings-field-value">15 min</span>
+                </label>
+                <input type="range" id="session-timeout-range" class="settings-range"
+                       min="0" max="120" step="5" value="15">
+                <p class="settings-field-desc">
+                    Ponlo en <strong>0</strong> para desactivar la caducidad, en instalaciones
+                    de sala de control donde la pantalla debe permanecer siempre abierta.
+                </p>
+
+                <div id="session-settings-msg" class="settings-msg"></div>
+
+                <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border-color);">
+                    <p class="settings-field-desc" id="session-status" style="margin:0;"></p>
+                </div>
             </div>
 
         </div>

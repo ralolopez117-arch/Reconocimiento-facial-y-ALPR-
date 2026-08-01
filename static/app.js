@@ -1,13 +1,22 @@
+// Rol del usuario en sesión, inyectado por la plantilla. Gobierna qué partes de
+// la interfaz se construyen. El servidor valida los permisos de nuevo en cada
+// endpoint: esto es comodidad visual, no la barrera de seguridad.
+const IS_ADMIN = document.body.dataset.role === 'admin';
+
 document.addEventListener('DOMContentLoaded', () => {
     fetchCameras();
     fetchDisplaySettings();
-    fetchDetectionSettings();
+    if (IS_ADMIN) fetchDetectionSettings();
+    startSessionWatch();
     setLayout(4); // Build initial 4-cell grid
 
     // Sidebar toggle
     document.getElementById('toggle-sidebar').addEventListener('click', () => {
         document.getElementById('sidebar').classList.toggle('hidden');
     });
+
+    // Buscador de cámaras por nombre
+    document.getElementById('camera-search-input').addEventListener('input', renderCameraList);
 
     // Modal logic
     const modal = document.getElementById('modal-overlay');
@@ -74,23 +83,47 @@ async function fetchDetectionSettings() {
 
 function renderCameraList() {
     const list = document.getElementById('camera-list');
+    const filtro = (document.getElementById('camera-search-input')?.value || '')
+        .trim().toLowerCase();
+
     list.innerHTML = '';
-    cameras.forEach(cam => {
+
+    const visibles = filtro
+        ? cameras.filter(c => (c.name || '').toLowerCase().includes(filtro))
+        : cameras;
+
+    if (visibles.length === 0) {
+        const vacio = document.createElement('li');
+        vacio.style.cssText = 'padding:14px 16px; color:var(--text-muted); font-size:13px;';
+        vacio.textContent = filtro
+            ? `Ninguna cámara coincide con "${filtro}"`
+            : 'No hay cámaras registradas';
+        list.appendChild(vacio);
+        return;
+    }
+
+    visibles.forEach(cam => {
         const li = document.createElement('li');
         li.className = 'camera-item';
         li.draggable = true;
         li.ondragstart = (e) => e.dataTransfer.setData('text/plain', JSON.stringify(cam));
-        
+
         const ptzBadge = cam.is_ptz ? '<span class="ptz-badge">PTZ</span>' : '';
+        // Editar y eliminar solo para administradores. El operador ve la lista
+        // y puede arrastrar cámaras a la cuadrícula, pero no modificarlas.
+        const acciones = IS_ADMIN ? `
+            <div class="cam-actions">
+                <button onclick="openModal('${cam.id}')">✎</button>
+                <button onclick="deleteCamera('${cam.id}')">🗑</button>
+            </div>
+        ` : '';
+
         li.innerHTML = `
             <div class="cam-info">
                 <h4>${cam.name} ${ptzBadge}</h4>
                 <span>${cam.type}</span>
             </div>
-            <div class="cam-actions">
-                <button onclick="openModal('${cam.id}')">✎</button>
-                <button onclick="deleteCamera('${cam.id}')">🗑</button>
-            </div>
+            ${acciones}
         `;
         list.appendChild(li);
     });
@@ -494,8 +527,12 @@ document.getElementById('open-settings-btn').addEventListener('click', () => {
     // Releer del servidor al abrir: los ajustes pueden haber cambiado desde
     // otra pestaña o desde otro equipo en modo remoto.
     fetchDisplaySettings();
-    fetchDetectionSettings();
-    fetchAlprSettings();
+    if (IS_ADMIN) {
+        fetchDetectionSettings();
+        fetchAlprSettings();
+        fetchSecuritySettings();
+        fetchUsers();
+    }
     document.getElementById('settings-modal-overlay').classList.add('active');
 });
 
@@ -595,6 +632,9 @@ let alprPollInterval = null;
 
 document.getElementById('open-alpr-btn').addEventListener('click', () => {
     document.getElementById('alpr-modal-overlay').classList.add('active');
+    // Los tipos dependen del país configurado, que pudo cambiar desde la última
+    // vez que se abrió este panel.
+    fetchAlprSettings().then(fetchPlateTypes);
     fetchLatestPlates();
     // Start polling every 2 seconds
     alprPollInterval = setInterval(fetchLatestPlates, 2000);
@@ -689,6 +729,8 @@ document.querySelectorAll('.fr-tab').forEach(btn => {
         if (btn.dataset.tab === 'fr-tab-detections') fetchLatestFaces();
         if (btn.dataset.tab === 'alpr-tab-manage') fetchWatchedPlates();
         if (btn.dataset.tab === 'alpr-tab-detections') fetchLatestPlates();
+        if (btn.dataset.tab === 'settings-tab-users') fetchUsers();
+        if (btn.dataset.tab === 'settings-tab-session') fetchSecuritySettings();
     });
 });
 
@@ -912,28 +954,85 @@ document.getElementById('fr-delete-all-btn').addEventListener('click', async () 
 // ---- ALPR Watchlist Management ----
 let lastAlprAlertTimestamp = null;
 
+// ---- Tipos de placa ----
+// Los tipos dependen del país configurado en los ajustes, así que se recargan
+// cada vez que se abre el panel de placas en lugar de solo al iniciar.
+
+let plateTypes = [];
+let plateTypesCountry = '';
+
+async function fetchPlateTypes() {
+    const res = await fetch('/api/plate_types');
+    const data = await res.json();
+    plateTypes = data.types || [];
+    plateTypesCountry = data.country || '';
+
+    const select = document.getElementById('alpr-register-type');
+    const previo = select.value;
+    select.innerHTML = '';
+    plateTypes.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.key;
+        opt.textContent = t.color ? `${t.name} — ${t.color}` : t.name;
+        select.appendChild(opt);
+    });
+    // Conservar la elección del usuario si el tipo sigue existiendo
+    select.value = plateTypes.some(t => t.key === previo) ? previo : 'any';
+
+    // Indicar de qué país son los tipos, y avisar cuando son los genéricos
+    const etiqueta = document.getElementById('alpr-register-country');
+    const fmt = (typeof alprFormats !== 'undefined')
+        ? alprFormats.find(f => f.key === plateTypesCountry) : null;
+    const nombrePais = fmt ? fmt.name : plateTypesCountry;
+    etiqueta.textContent = data.specific
+        ? `(${nombrePais})`
+        : `(${nombrePais} — tipos genéricos)`;
+
+    updatePlateTypeDescription();
+}
+
+function updatePlateTypeDescription() {
+    const key = document.getElementById('alpr-register-type').value;
+    const t = plateTypes.find(x => x.key === key);
+    document.getElementById('alpr-register-type-desc').textContent = t ? t.description : '';
+}
+
+document.getElementById('alpr-register-type').addEventListener('change', updatePlateTypeDescription);
+
 // Handle ALPR Register Form
 document.getElementById('alpr-register-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const pattern = document.getElementById('alpr-register-pattern').value.toUpperCase();
     const note = document.getElementById('alpr-register-note').value;
-    
+    const plate_type = document.getElementById('alpr-register-type').value;
+
     const msgDiv = document.getElementById('alpr-register-msg');
     msgDiv.textContent = "Registrando...";
     msgDiv.style.color = "var(--text-color)";
-    
+
     try {
         const res = await fetch('/api/watched_plates', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({plate_pattern: pattern, note: note})
+            body: JSON.stringify({
+                plate_pattern: pattern, note: note,
+                plate_type: plate_type, country: plateTypesCountry
+            })
         });
         const data = await res.json();
-        
+
         if (data.status === 'success') {
-            msgDiv.textContent = "Placa registrada correctamente.";
-            msgDiv.style.color = "#4CAF50";
+            if (data.warning) {
+                // Se guardó, pero la matrícula no encaja con el tipo elegido.
+                // Es un aviso, no un error: puede ser una variante legítima.
+                msgDiv.textContent = `Registrada. Aviso: ${data.warning}`;
+                msgDiv.style.color = "#fbbf24";
+            } else {
+                msgDiv.textContent = "Placa registrada correctamente.";
+                msgDiv.style.color = "#4CAF50";
+            }
             document.getElementById('alpr-register-form').reset();
+            updatePlateTypeDescription();
         } else {
             msgDiv.textContent = data.message || "Error al registrar.";
             msgDiv.style.color = "#F44336";
@@ -955,15 +1054,24 @@ function renderWatchedPlates(plates) {
     tbody.innerHTML = '';
     
     if (plates.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:var(--text-muted);">No hay placas registradas</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No hay placas registradas</td></tr>';
         return;
     }
-    
+
     plates.forEach(p => {
         const tr = document.createElement('tr');
         tr.dataset.id = p.id;
+        // El tipo y el país se conservan al editar, aunque no se muestren como
+        // campos editables en la fila.
+        tr.dataset.plateType = p.plate_type || 'any';
+        tr.dataset.country = p.country || '';
+
+        const tipo = plateTypes.find(t => t.key === p.plate_type);
+        const nombreTipo = tipo && tipo.key !== 'any' ? tipo.name : '—';
+
         tr.innerHTML = `
             <td class="alpr-pattern-cell"><strong>${p.plate_pattern}</strong></td>
+            <td class="alpr-type-cell" style="color:var(--text-muted); font-size:0.9em;">${nombreTipo}</td>
             <td class="alpr-note-cell">${p.note || ''}</td>
             <td style="white-space:nowrap;">
                 <button class="btn-edit" onclick="startAlprRename(${p.id}, this)">✏ Editar</button>
@@ -977,23 +1085,40 @@ function renderWatchedPlates(plates) {
 function startAlprRename(id, btn) {
     const tr = btn.closest('tr');
     const patternCell = tr.querySelector('.alpr-pattern-cell');
+    const typeCell = tr.querySelector('.alpr-type-cell');
     const noteCell = tr.querySelector('.alpr-note-cell');
-    
+
     const currentPattern = patternCell.textContent;
     const currentNote = noteCell.textContent;
-    
-    patternCell.innerHTML = `<input type="text" class="edit-pattern" value="${currentPattern}" 
-        style="width:100%; box-sizing:border-box; padding:4px 8px; background:var(--bg-card); 
+    const currentType = tr.dataset.plateType || 'any';
+
+    patternCell.innerHTML = `<input type="text" class="edit-pattern" value="${currentPattern}"
+        style="width:100%; box-sizing:border-box; padding:4px 8px; background:var(--bg-card);
         border:1px solid var(--primary-color); border-radius:4px; color:var(--text-color); font-size:0.95em; text-transform: uppercase;">`;
-        
-    noteCell.innerHTML = `<input type="text" class="edit-note" value="${currentNote}" 
-        style="width:100%; box-sizing:border-box; padding:4px 8px; background:var(--bg-card); 
+
+    // Desplegable con los tipos del país activo. Si la entrada se registró con
+    // un tipo de otro país que ya no está en la lista, se añade igualmente para
+    // no perderlo en silencio al editar cualquier otro campo.
+    const opciones = plateTypes.map(t =>
+        `<option value="${t.key}"${t.key === currentType ? ' selected' : ''}>${t.name}</option>`
+    );
+    if (!plateTypes.some(t => t.key === currentType)) {
+        opciones.unshift(`<option value="${currentType}" selected>${currentType} (otro país)</option>`);
+    }
+    typeCell.innerHTML = `<select class="edit-type"
+        style="width:100%; box-sizing:border-box; padding:4px 8px; background:var(--bg-card);
+        border:1px solid var(--primary-color); border-radius:4px; color:var(--text-color); font-size:0.9em;">
+        ${opciones.join('')}
+    </select>`;
+
+    noteCell.innerHTML = `<input type="text" class="edit-note" value="${currentNote}"
+        style="width:100%; box-sizing:border-box; padding:4px 8px; background:var(--bg-card);
         border:1px solid var(--primary-color); border-radius:4px; color:var(--text-color); font-size:0.95em;">`;
-    
+
     const input = patternCell.querySelector('input');
     input.focus();
     input.select();
-    
+
     const actionsCell = btn.parentElement;
     actionsCell.innerHTML = `
         <button class="btn-edit" onclick="confirmAlprRename(${id}, this)">✔ Guardar</button>
@@ -1004,17 +1129,36 @@ function startAlprRename(id, btn) {
 async function confirmAlprRename(id, btn) {
     const tr = btn.closest('tr');
     const patternInput = tr.querySelector('.edit-pattern');
+    const typeSelect = tr.querySelector('.edit-type');
     const noteInput = tr.querySelector('.edit-note');
-    
+
     const newPattern = patternInput ? patternInput.value.trim().toUpperCase() : '';
     const newNote = noteInput ? noteInput.value.trim() : '';
+    const newType = typeSelect ? typeSelect.value : (tr.dataset.plateType || 'any');
     if (!newPattern) return;
-    
-    await fetch(`/api/watched_plates/${id}`, {
+
+    // Las entradas anteriores a la columna de país no tienen ninguno guardado.
+    // Al asignarles un tipo hay que fijar también el país activo, o el tipo no
+    // podría validarse después.
+    const country = tr.dataset.country || plateTypesCountry || '';
+
+    const res = await fetch(`/api/watched_plates/${id}`, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({plate_pattern: newPattern, note: newNote})
+        body: JSON.stringify({
+            plate_pattern: newPattern, note: newNote,
+            plate_type: newType, country: country
+        })
     });
+    const data = await res.json().catch(() => ({}));
+
+    if (data.status === 'error') {
+        alert(data.message || 'No se pudo guardar el cambio.');
+        return;
+    }
+    if (data.warning) {
+        showToast(`⚠ Guardado. ${data.warning}`);
+    }
     fetchWatchedPlates();
 }
 
@@ -1055,3 +1199,210 @@ setInterval(async () => {
         // ignore
     }
 }, 2000);
+
+
+// ===========================================================================
+//  Sesión y usuarios
+// ===========================================================================
+
+// Cuando el servidor cierra la sesión por caducidad, cualquier llamada responde
+// 401. Se intercepta fetch para llevar al usuario al inicio de sesión en cuanto
+// ocurra, en lugar de dejar la interfaz fallando en silencio.
+const _fetchOriginal = window.fetch;
+window.fetch = async function (...args) {
+    const res = await _fetchOriginal.apply(this, args);
+    if (res.status === 401) {
+        const data = await res.clone().json().catch(() => ({}));
+        if (data.code === 'session_expired' || data.code === 'unauthenticated') {
+            window.location.href = '/login';
+        }
+    }
+    return res;
+};
+
+// Consulta periódica del estado de sesión. Sin esto, un puesto que quedara
+// abierto sin streams no se enteraría de la caducidad hasta la siguiente acción.
+function startSessionWatch() {
+    setInterval(async () => {
+        try {
+            const res = await fetch('/api/session');
+            if (!res.ok) return;          // El interceptor ya redirige si procede
+            updateSessionStatus(await res.json());
+        } catch (e) {
+            // Corte de red momentáneo: se reintenta en el siguiente ciclo
+        }
+    }, 30000);
+}
+
+function updateSessionStatus(data) {
+    const box = document.getElementById('session-status');
+    if (!box) return;
+    if (data.seconds_left === null) {
+        box.textContent = 'La caducidad de sesión está desactivada.';
+        return;
+    }
+    const min = Math.floor(data.seconds_left / 60);
+    const seg = data.seconds_left % 60;
+    box.textContent = `Sin visualizar cámaras desde hace ${data.idle_seconds} s. `
+        + `La sesión se cerrará en ${min} min ${seg} s si no se abre ninguna.`;
+}
+
+// ---- Ajuste del tiempo de caducidad (solo administrador) ----
+
+async function fetchSecuritySettings() {
+    const res = await fetch('/api/security_settings');
+    if (!res.ok) return;
+    const data = await res.json();
+    document.getElementById('session-timeout-range').value = data.session_timeout_minutes;
+    renderTimeoutLabel(data.session_timeout_minutes);
+}
+
+function renderTimeoutLabel(min) {
+    document.getElementById('session-timeout-value').textContent =
+        Number(min) === 0 ? 'Desactivado' : `${min} min`;
+}
+
+async function saveSecuritySettings() {
+    const minutes = parseInt(document.getElementById('session-timeout-range').value, 10);
+    const res = await fetch('/api/security_settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_timeout_minutes: minutes })
+    });
+    const data = await res.json().catch(() => ({}));
+    const msg = document.getElementById('session-settings-msg');
+
+    if (res.ok) {
+        msg.textContent = minutes === 0
+            ? '✔ Caducidad de sesión desactivada'
+            : `✔ La sesión se cerrará tras ${minutes} min sin visualizar cámaras`;
+        msg.style.color = '#4ade80';
+    } else {
+        msg.textContent = `✖ ${data.message || 'No se pudo guardar'}`;
+        msg.style.color = '#f87171';
+    }
+    msg.classList.add('visible');
+    clearTimeout(saveSecuritySettings._t);
+    saveSecuritySettings._t = setTimeout(() => msg.classList.remove('visible'), 2500);
+}
+
+// ---- Gestión de usuarios (solo administrador) ----
+
+let currentUserId = null;
+
+async function fetchUsers() {
+    const res = await fetch('/api/users');
+    if (!res.ok) return;
+    const data = await res.json();
+    currentUserId = data.current_user_id;
+    renderUsers(data.users, data.roles);
+}
+
+function renderUsers(users, roles) {
+    const tbody = document.getElementById('users-table-body');
+    tbody.innerHTML = '';
+
+    users.forEach(u => {
+        const esUnoMismo = u.id === currentUserId;
+        const opciones = roles.map(r =>
+            `<option value="${r.key}"${r.key === u.role ? ' selected' : ''}>${r.label}</option>`
+        ).join('');
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><strong>${u.username}</strong>${esUnoMismo ? ' <span style="color:var(--text-muted); font-size:0.85em;">(tú)</span>' : ''}</td>
+            <td>
+                <select onchange="changeUserRole(${u.id}, this.value)"
+                    style="padding:4px 8px; background:var(--bg-card); border:1px solid var(--border-color);
+                           border-radius:4px; color:var(--text-color); font-size:0.9em;">
+                    ${opciones}
+                </select>
+            </td>
+            <td style="color:var(--text-muted); font-size:0.85em;">${(u.created_at || '').split('.')[0]}</td>
+            <td style="text-align:right; white-space:nowrap;">
+                <button class="btn-edit" title="Cambiar contraseña"
+                        onclick="resetUserPassword(${u.id}, '${u.username}')">🔑</button>
+                <button class="btn-delete" title="Eliminar usuario"
+                        onclick="removeUser(${u.id}, '${u.username}')"
+                        ${esUnoMismo ? 'disabled style="opacity:0.4; cursor:default;"' : ''}>🗑</button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+async function changeUserRole(id, role) {
+    const res = await fetch(`/api/users/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role })
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+        alert(data.message || 'No se pudo cambiar el rol.');
+    } else if (id === currentUserId && role !== 'admin') {
+        // El administrador se ha degradado a sí mismo: la interfaz que tiene
+        // delante ya no corresponde a sus permisos, así que se recarga.
+        alert('Has cambiado tu propio rol. Se recargará la interfaz.');
+        window.location.reload();
+        return;
+    }
+    fetchUsers();
+}
+
+async function resetUserPassword(id, username) {
+    const nueva = prompt(`Nueva contraseña para "${username}":`);
+    if (!nueva) return;
+    const res = await fetch(`/api/users/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: nueva })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) showToast(`Contraseña actualizada para ${username}`);
+    else alert(data.message || 'No se pudo cambiar la contraseña.');
+}
+
+async function removeUser(id, username) {
+    if (!confirm(`¿Eliminar al usuario "${username}"?`)) return;
+    const res = await fetch(`/api/users/${id}`, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) alert(data.message || 'No se pudo eliminar.');
+    fetchUsers();
+}
+
+// Estos controles solo existen en la interfaz de administrador
+if (IS_ADMIN) {
+    document.getElementById('user-create-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const msg = document.getElementById('user-create-msg');
+        const res = await fetch('/api/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username: document.getElementById('user-new-name').value,
+                password: document.getElementById('user-new-password').value,
+                role: document.getElementById('user-new-role').value
+            })
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok) {
+            msg.textContent = '✔ Usuario creado';
+            msg.style.color = '#4ade80';
+            document.getElementById('user-create-form').reset();
+            fetchUsers();
+        } else {
+            msg.textContent = `✖ ${data.message || 'No se pudo crear'}`;
+            msg.style.color = '#f87171';
+        }
+        msg.classList.add('visible');
+        setTimeout(() => msg.classList.remove('visible'), 3000);
+    });
+
+    document.getElementById('session-timeout-range')
+        .addEventListener('input', (e) => renderTimeoutLabel(e.target.value));
+    document.getElementById('session-timeout-range')
+        .addEventListener('change', saveSecuritySettings);
+}

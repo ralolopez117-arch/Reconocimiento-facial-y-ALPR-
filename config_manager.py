@@ -66,6 +66,26 @@ def save_alpr_settings(settings):
     save_config(config)
 
 
+def get_security_settings():
+    """
+    Ajustes de sesión, definidos por el administrador.
+
+    session_timeout_minutes: minutos SIN visualizar ningún stream tras los
+                             cuales la sesión caduca y hay que volver a entrar.
+                             Mientras haya una cámara abierta no caduca nunca.
+    """
+    config = load_config()
+    defaults = {"session_timeout_minutes": 15}
+    stored = config.get("security_settings", {})
+    return {**defaults, **stored}
+
+
+def save_security_settings(settings):
+    config = load_config()
+    config["security_settings"] = settings
+    save_config(config)
+
+
 def get_detection_mode():
     config = load_config()
     return config.get("detection_mode", "monitored")

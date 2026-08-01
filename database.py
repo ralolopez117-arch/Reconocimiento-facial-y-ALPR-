@@ -63,6 +63,40 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
+    _migrate_schema()
+
+def _migrate_schema():
+    """
+    Aplica cambios de esquema sobre bases de datos ya existentes.
+
+    CREATE TABLE IF NOT EXISTS no añade columnas nuevas a una tabla que ya
+    existe, así que las incorporaciones posteriores se hacen aquí. Cada paso
+    comprueba primero si la columna está para poder ejecutarse en cada arranque
+    sin efectos.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("PRAGMA table_info(watched_plates)")
+    columns = {row["name"] for row in cursor.fetchall()}
+
+    if "plate_type" not in columns:
+        # Las entradas anteriores a esta columna no tienen tipo asignado, y
+        # 'any' es justamente el valor que no impone restricción, así que
+        # conservan su comportamiento original.
+        cursor.execute(
+            "ALTER TABLE watched_plates ADD COLUMN plate_type TEXT DEFAULT 'any'"
+        )
+
+    if "country" not in columns:
+        # País vigente cuando se registró la placa. Permite validar el tipo
+        # aunque después se cambie el país global en la configuración.
+        cursor.execute(
+            "ALTER TABLE watched_plates ADD COLUMN country TEXT DEFAULT ''"
+        )
+
+    conn.commit()
+    conn.close()
 
 def insert_plate(camera_id, plate_text, confidence):
     conn = get_connection()
@@ -184,22 +218,25 @@ def get_all_watched_plates():
     conn.close()
     return [dict(row) for row in rows]
 
-def insert_watched_plate(plate_pattern, note=''):
+def insert_watched_plate(plate_pattern, note='', plate_type='any', country=''):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        'INSERT INTO watched_plates (plate_pattern, note) VALUES (?, ?)',
-        (plate_pattern.upper().strip(), note)
+        '''INSERT INTO watched_plates (plate_pattern, note, plate_type, country)
+           VALUES (?, ?, ?, ?)''',
+        (plate_pattern.upper().strip(), note, plate_type, country)
     )
     conn.commit()
     conn.close()
 
-def update_watched_plate(plate_id, plate_pattern, note=''):
+def update_watched_plate(plate_id, plate_pattern, note='', plate_type='any', country=''):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        'UPDATE watched_plates SET plate_pattern = ?, note = ? WHERE id = ?',
-        (plate_pattern.upper().strip(), note, plate_id)
+        '''UPDATE watched_plates
+           SET plate_pattern = ?, note = ?, plate_type = ?, country = ?
+           WHERE id = ?''',
+        (plate_pattern.upper().strip(), note, plate_type, country, plate_id)
     )
     conn.commit()
     conn.close()
@@ -219,17 +256,56 @@ def delete_all_watched_plates():
     conn.close()
 
 def check_plate_against_watchlist(plate_text):
-    """Returns the matched watched_plate row if the plate is in the watchlist, else None."""
+    """
+    Devuelve la entrada de la lista de vigilancia que coincide, o None.
+
+    La coincidencia es EXACTA salvo que el patrón registrado incluya comodines:
+
+        ABC123    coincide solo con ABC123
+        ABC*      coincide con cualquier placa que empiece por ABC
+        ABC1?3    ? sustituye a un único carácter
+
+    Antes se comparaba por subcadena, de modo que un patrón corto disparaba
+    alertas sin parar: "ABC" saltaba con ABC123, XABC99 y cualquier placa que lo
+    contuviera. Los comodines dejan esa búsqueda parcial disponible, pero solo
+    cuando se pide de forma explícita.
+
+    Si la entrada tiene un tipo de placa asignado, la lectura además debe encajar
+    con el subformato de ese tipo. Así una placa vigilada de remolque colombiano
+    (R12345) no alerta ante un texto que no empiece por R.
+    """
+    import fnmatch
+    from plate_types import matches_type, ANY_TYPE
+
+    text = plate_text.upper().strip()
+
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('SELECT * FROM watched_plates')
     watched = cursor.fetchall()
     conn.close()
+
     for w in watched:
-        pattern = w['plate_pattern'].upper()
-        # Simple substring match (e.g. partial plate) or exact
-        if pattern in plate_text.upper() or plate_text.upper() == pattern:
-            return dict(w)
+        entry = dict(w)
+        pattern = entry['plate_pattern'].upper().strip()
+        if not pattern:
+            continue
+
+        if '*' in pattern or '?' in pattern:
+            coincide = fnmatch.fnmatchcase(text, pattern)
+        else:
+            coincide = (text == pattern)
+
+        if not coincide:
+            continue
+
+        # Filtro adicional por tipo de placa, si la entrada lo especifica
+        plate_type = entry.get('plate_type') or ANY_TYPE
+        country = entry.get('country') or ''
+        if plate_type != ANY_TYPE and not matches_type(text, country, plate_type):
+            continue
+
+        return entry
     return None
 
 def insert_plate_alert(camera_id, plate_text, matched_pattern, confidence):

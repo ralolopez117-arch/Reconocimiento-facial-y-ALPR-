@@ -1,30 +1,189 @@
+import datetime
 import uuid
-from flask import Flask, render_template, Response, request, jsonify
+from flask import (Flask, render_template, Response, request, jsonify,
+                   redirect, session, url_for)
 from config_manager import (load_config, save_config, get_display_settings,
                             save_display_settings, get_detection_mode,
                             save_detection_mode, get_alpr_settings,
-                            save_alpr_settings)
+                            save_alpr_settings, get_security_settings,
+                            save_security_settings)
+import auth
+from auth import login_required, admin_required
 from plate_format import PLATE_PATTERNS, list_formats
+from plate_types import (ANY_TYPE, list_types, is_known_type, describe_mismatch,
+                         country_has_specific_types)
 from streamer import generate_frames
 import database
 from background_processor import background_manager
 from ptz_control import get_ptz_controller
 
 app = Flask(__name__)
+app.secret_key = auth.get_secret_key()
+
+# La cookie de sesión sobrevive al cierre del navegador; quien decide cuándo
+# caduca es la comprobación de actividad de streams, no el navegador.
+app.permanent_session_lifetime = datetime.timedelta(days=7)
+
+auth.init_users()
 
 # Start background processor manager
 background_manager.start()
 
+
+@app.before_request
+def enforce_session_timeout():
+    """
+    Cierra la sesión tras el plazo configurado sin visualizar ningún stream.
+
+    Se comprueba antes de cada petición. Las rutas de inicio de sesión y los
+    archivos estáticos quedan fuera para no crear un bucle de redirecciones.
+    """
+    if request.endpoint in ('login', 'logout', 'static') or request.path.startswith('/static/'):
+        return None
+    if auth.current_user() is None:
+        return None
+
+    timeout_min = get_security_settings().get("session_timeout_minutes", 15)
+    # 0 o negativo desactiva la caducidad, para instalaciones de sala de control
+    # donde la pantalla debe quedarse siempre abierta.
+    if timeout_min <= 0:
+        return None
+
+    if auth.seconds_since_stream(session.get("sid")) > timeout_min * 60:
+        auth.end_session()
+        if request.path.startswith('/api/'):
+            return jsonify({"status": "error", "code": "session_expired",
+                            "message": "Sesión caducada por inactividad"}), 401
+        return redirect(url_for('login'))
+    return None
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'GET':
+        if auth.current_user() is not None:
+            return redirect(url_for('index'))
+        return render_template('login.html')
+
+    data = request.json or {}
+    user = auth.get_user_by_name(data.get('username', ''))
+    if user is None or not auth.verify_password(data.get('password', ''),
+                                                user['password_hash']):
+        # El mismo mensaje para usuario inexistente y contraseña incorrecta:
+        # distinguirlos permitiría averiguar qué usuarios existen.
+        return jsonify({'status': 'error',
+                        'message': 'Usuario o contraseña incorrectos'}), 401
+
+    auth.start_session(user)
+    return jsonify({'status': 'success', 'role': user['role'],
+                    'username': user['username']})
+
+
+@app.route('/logout')
+def logout():
+    auth.end_session()
+    return redirect(url_for('login'))
+
+
+@app.route('/api/session', methods=['GET'])
+@login_required
+def get_session_info():
+    """
+    Estado de la sesión. El frontend lo consulta periódicamente para redirigir
+    al inicio de sesión en cuanto caduca.
+    """
+    timeout_min = get_security_settings().get("session_timeout_minutes", 15)
+    idle = auth.seconds_since_stream(session.get("sid"))
+    return jsonify({
+        **auth.current_user(),
+        'role_label': auth.ROLE_LABELS.get(session.get('role'), ''),
+        'session_timeout_minutes': timeout_min,
+        'idle_seconds': int(idle),
+        'seconds_left': None if timeout_min <= 0 else max(0, int(timeout_min * 60 - idle)),
+    })
+
+
 @app.route('/')
+@login_required
 def index():
-    return render_template('index.html')
+    user = auth.current_user()
+    return render_template('index.html', user=user, is_admin=auth.is_admin())
+
+@app.route('/api/users', methods=['GET'])
+@admin_required
+def get_users():
+    return jsonify({
+        'users': auth.list_users(),
+        'roles': [{'key': r, 'label': auth.ROLE_LABELS[r]} for r in auth.VALID_ROLES],
+        'current_user_id': session.get('user_id'),
+    })
+
+@app.route('/api/users', methods=['POST'])
+@admin_required
+def add_user():
+    data = request.json or {}
+    user_id, error = auth.create_user(data.get('username', ''),
+                                      data.get('password', ''),
+                                      data.get('role', auth.ROLE_OPERATOR))
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+    return jsonify({'status': 'success', 'id': user_id})
+
+@app.route('/api/users/<int:user_id>', methods=['PUT'])
+@admin_required
+def edit_user(user_id):
+    data = request.json or {}
+    error = auth.update_user(user_id, role=data.get('role'),
+                             password=data.get('password'))
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+
+    # Si el administrador se cambia el rol a sí mismo, la sesión debe reflejarlo
+    # de inmediato o seguiría viendo la interfaz de administrador sin permisos.
+    if user_id == session.get('user_id') and data.get('role'):
+        session['role'] = data['role']
+    return jsonify({'status': 'success'})
+
+@app.route('/api/users/<int:user_id>', methods=['DELETE'])
+@admin_required
+def remove_user(user_id):
+    if user_id == session.get('user_id'):
+        return jsonify({'status': 'error',
+                        'message': 'No puedes eliminar tu propio usuario'}), 400
+    error = auth.delete_user(user_id)
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+    return jsonify({'status': 'success'})
+
+@app.route('/api/security_settings', methods=['GET'])
+@login_required
+def get_security_config():
+    return jsonify(get_security_settings())
+
+@app.route('/api/security_settings', methods=['PUT'])
+@admin_required
+def update_security_config():
+    data = request.json or {}
+    try:
+        minutes = int(data.get('session_timeout_minutes', 15))
+    except (TypeError, ValueError):
+        return jsonify({'status': 'error',
+                        'message': 'El tiempo debe ser un número de minutos'}), 400
+    if minutes < 0 or minutes > 1440:
+        return jsonify({'status': 'error',
+                        'message': 'El tiempo debe estar entre 0 y 1440 minutos'}), 400
+
+    save_security_settings({'session_timeout_minutes': minutes})
+    return jsonify({'status': 'success', 'session_timeout_minutes': minutes})
 
 @app.route('/api/cameras', methods=['GET'])
+@login_required
 def get_cameras():
     config = load_config()
     return jsonify(config.get("cameras", []))
 
 @app.route('/api/cameras', methods=['POST'])
+@admin_required
 def add_camera():
     data = request.json
     config = load_config()
@@ -45,6 +204,7 @@ def add_camera():
     return jsonify(new_cam)
 
 @app.route('/api/cameras/<cam_id>', methods=['PUT'])
+@admin_required
 def edit_camera(cam_id):
     data = request.json
     config = load_config()
@@ -64,6 +224,7 @@ def edit_camera(cam_id):
     return jsonify({"status": "success"})
 
 @app.route('/api/cameras/<cam_id>', methods=['DELETE'])
+@admin_required
 def delete_camera(cam_id):
     config = load_config()
     config["cameras"] = [c for c in config.get("cameras", []) if c["id"] != cam_id]
@@ -72,10 +233,12 @@ def delete_camera(cam_id):
     return jsonify({"status": "success"})
 
 @app.route('/api/display_settings', methods=['GET'])
+@login_required
 def get_settings():
     return jsonify(get_display_settings())
 
 @app.route('/api/display_settings', methods=['PUT'])
+@login_required
 def update_settings():
     data = request.json
     current = get_display_settings()
@@ -88,10 +251,12 @@ def update_settings():
     return jsonify({"status": "success"})
 
 @app.route('/api/detection_settings', methods=['GET'])
+@login_required
 def get_detection_settings():
     return jsonify({"detection_mode": get_detection_mode()})
 
 @app.route('/api/detection_settings', methods=['PUT'])
+@admin_required
 def update_detection_settings():
     data = request.json
     mode = data.get("detection_mode", "monitored")
@@ -102,6 +267,7 @@ def update_detection_settings():
     return jsonify({"status": "error", "message": "Invalid detection mode"}), 400
 
 @app.route('/api/alpr_settings', methods=['GET'])
+@login_required
 def get_alpr_config():
     """Ajustes actuales del lector de matrículas y formatos disponibles."""
     return jsonify({
@@ -110,6 +276,7 @@ def get_alpr_config():
     })
 
 @app.route('/api/alpr_settings', methods=['PUT'])
+@admin_required
 def update_alpr_config():
     """
     Cambia el formato de matrícula que se exige al validar una lectura.
@@ -155,6 +322,7 @@ def _find_camera_by_id(cam_id):
     return None
 
 @app.route('/api/camera/<cam_id>/ptz/move', methods=['POST'])
+@login_required
 def ptz_move(cam_id):
     cam = _find_camera_by_id(cam_id)
     if not cam:
@@ -172,6 +340,7 @@ def ptz_move(cam_id):
     return jsonify({"status": "error", "message": msg}), 500
 
 @app.route('/api/camera/<cam_id>/ptz', methods=['POST'])
+@login_required
 def ptz_action(cam_id):
     cam = _find_camera_by_id(cam_id)
     if not cam:
@@ -196,6 +365,7 @@ def ptz_action(cam_id):
     return jsonify({"status": "error", "message": msg}), 500
 
 @app.route('/api/camera/<cam_id>/ptz/stop', methods=['POST'])
+@login_required
 def ptz_stop(cam_id):
     cam = _find_camera_by_id(cam_id)
     if not cam:
@@ -209,12 +379,14 @@ def ptz_stop(cam_id):
 
 
 @app.route('/api/plates/latest', methods=['GET'])
+@login_required
 def get_latest_plates():
     limit = request.args.get('limit', 10, type=int)
     plates = database.get_latest_plates(limit)
     return jsonify(plates)
 
 @app.route('/api/plates/search', methods=['GET'])
+@login_required
 def search_plates():
     query = request.args.get('q', '')
     limit = request.args.get('limit', 50, type=int)
@@ -222,6 +394,7 @@ def search_plates():
     return jsonify(plates)
 
 @app.route('/api/faces/register', methods=['POST'])
+@login_required
 def register_face():
     if 'image' not in request.files:
         return jsonify({"status": "error", "message": "No image provided"}), 400
@@ -245,18 +418,21 @@ def register_face():
         return jsonify({"status": "error", "message": msg}), 400
 
 @app.route('/api/faces/latest', methods=['GET'])
+@login_required
 def get_latest_faces():
     limit = request.args.get('limit', 10, type=int)
     faces = database.get_latest_face_detections(limit)
     return jsonify(faces)
 
 @app.route('/api/faces/known', methods=['GET'])
+@login_required
 def get_known_faces():
     faces = database.get_all_known_faces()
     # Don't send embeddings to the frontend (too large)
     return jsonify([{'id': f['id'], 'name': f['name']} for f in faces])
 
 @app.route('/api/faces/known/<int:face_id>', methods=['PUT'])
+@admin_required
 def rename_face(face_id):
     new_name = request.form.get('name', '').strip()
     image_file = request.files.get('image')
@@ -281,6 +457,7 @@ def rename_face(face_id):
     return jsonify({'status': 'success'})
 
 @app.route('/api/faces/known/<int:face_id>', methods=['DELETE'])
+@admin_required
 def delete_face(face_id):
     database.delete_known_face(face_id)
     import os
@@ -291,6 +468,7 @@ def delete_face(face_id):
     return jsonify({'status': 'success'})
 
 @app.route('/api/faces/known', methods=['DELETE'])
+@admin_required
 def delete_all_faces():
     database.delete_all_known_faces()
     import os
@@ -304,47 +482,101 @@ def delete_all_faces():
 
 # --- Watchlist API Endpoints ---
 @app.route('/api/watched_plates', methods=['GET'])
+@login_required
 def get_watched_plates():
     plates = database.get_all_watched_plates()
     return jsonify(plates)
 
-@app.route('/api/watched_plates', methods=['POST'])
-def add_watched_plate():
-    data = request.json
-    pattern = data.get('plate_pattern', '').strip()
-    note = data.get('note', '').strip()
+@app.route('/api/plate_types', methods=['GET'])
+@login_required
+def get_plate_types():
+    """
+    Tipos de placa disponibles para un país.
+
+    Sin parámetro `country` se usa el país configurado en los ajustes de ALPR,
+    que es el caso normal desde la interfaz.
+    """
+    country = request.args.get('country') or get_alpr_settings()['plate_format']
+    return jsonify({
+        'country': country,
+        'specific': country_has_specific_types(country),
+        'types': list_types(country),
+    })
+
+def _validated_watch_payload(data):
+    """
+    Extrae y valida los campos comunes al alta y la edición de placas vigiladas.
+
+    Returns:
+        (payload, error) — uno de los dos siempre es None. `payload` incluye la
+        clave 'warning' cuando la matrícula no encaja con el tipo elegido: no
+        impide guardar, solo se informa al usuario.
+    """
+    pattern = (data.get('plate_pattern') or '').strip()
     if not pattern:
-        return jsonify({'status': 'error', 'message': 'Patrón de placa vacío'}), 400
-    database.insert_watched_plate(pattern, note)
-    return jsonify({'status': 'success'})
+        return None, 'Patrón de placa vacío'
+
+    country = data.get('country') or get_alpr_settings()['plate_format']
+    plate_type = data.get('plate_type') or ANY_TYPE
+
+    if not is_known_type(country, plate_type):
+        return None, f'Tipo de placa no válido para {country}: {plate_type}'
+
+    # Los patrones con comodín no se validan contra el formato: representan
+    # varias matrículas y no tienen por qué encajar como una sola.
+    warning = None
+    if '*' not in pattern and '?' not in pattern:
+        warning = describe_mismatch(pattern, country, plate_type)
+
+    return {
+        'pattern': pattern,
+        'note': (data.get('note') or '').strip(),
+        'plate_type': plate_type,
+        'country': country,
+        'warning': warning,
+    }, None
+
+@app.route('/api/watched_plates', methods=['POST'])
+@login_required
+def add_watched_plate():
+    payload, error = _validated_watch_payload(request.json or {})
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+    database.insert_watched_plate(payload['pattern'], payload['note'],
+                                  payload['plate_type'], payload['country'])
+    return jsonify({'status': 'success', 'warning': payload['warning']})
 
 @app.route('/api/watched_plates/<int:plate_id>', methods=['PUT'])
+@admin_required
 def update_watched_plate(plate_id):
-    data = request.json
-    pattern = data.get('plate_pattern', '').strip()
-    note = data.get('note', '').strip()
-    if not pattern:
-        return jsonify({'status': 'error', 'message': 'Patrón de placa vacío'}), 400
-    database.update_watched_plate(plate_id, pattern, note)
-    return jsonify({'status': 'success'})
+    payload, error = _validated_watch_payload(request.json or {})
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+    database.update_watched_plate(plate_id, payload['pattern'], payload['note'],
+                                  payload['plate_type'], payload['country'])
+    return jsonify({'status': 'success', 'warning': payload['warning']})
 
 @app.route('/api/watched_plates/<int:plate_id>', methods=['DELETE'])
+@admin_required
 def delete_watched_plate(plate_id):
     database.delete_watched_plate(plate_id)
     return jsonify({'status': 'success'})
 
 @app.route('/api/watched_plates', methods=['DELETE'])
+@admin_required
 def delete_all_watched_plates():
     database.delete_all_watched_plates()
     return jsonify({'status': 'success'})
 
 @app.route('/api/plate_alerts/latest', methods=['GET'])
+@login_required
 def get_latest_plate_alerts():
     limit = request.args.get('limit', 10, type=int)
     alerts = database.get_latest_plate_alerts(limit)
     return jsonify(alerts)
 
 @app.route('/video_feed/<cam_id>')
+@login_required
 def video_feed(cam_id):
     config = load_config()
     source = None
@@ -356,7 +588,23 @@ def video_feed(cam_id):
     if source is None:
         return "Camera not found", 404
 
-    return Response(generate_frames(source, cam_id=cam_id),
+    # El identificador se lee aquí, dentro del contexto de la petición: el
+    # generador se consume después, cuando ya no hay acceso a `session`.
+    sid = session.get('sid')
+
+    def tracked_frames():
+        """
+        Envuelve el generador de vídeo marcando actividad en cada fotograma.
+
+        Es lo que mantiene viva la sesión mientras haya una cámara en pantalla:
+        la conexión MJPEG es una única petición de larga duración, así que no
+        basta con registrar la actividad al inicio.
+        """
+        for chunk in generate_frames(source, cam_id=cam_id):
+            auth.touch_stream_activity(sid)
+            yield chunk
+
+    return Response(tracked_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
 if __name__ == '__main__':

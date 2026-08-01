@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Iniciar sesión — Monitoreo Inteligente</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="login-body">
+
+    <main class="login-card">
+        <div class="login-brand">
+            <div class="login-logo">📹</div>
+            <h1>Centro de Monitoreo Inteligente</h1>
+            <p>Introduce tus credenciales para continuar</p>
+        </div>
+
+        <form id="login-form" autocomplete="on">
+            <label class="login-label" for="login-username">Usuario</label>
+            <input type="text" id="login-username" name="username" required
+                   autocomplete="username" autofocus placeholder="Usuario">
+
+            <label class="login-label" for="login-password">Contraseña</label>
+            <input type="password" id="login-password" name="password" required
+                   autocomplete="current-password" placeholder="Contraseña">
+
+            <button type="submit" class="btn-primary login-submit" id="login-submit">
+                Iniciar sesión
+            </button>
+        </form>
+
+        <div id="login-error" class="login-error"></div>
+    </main>
+
+    <script>
+        const form = document.getElementById('login-form');
+        const errorBox = document.getElementById('login-error');
+        const submitBtn = document.getElementById('login-submit');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            errorBox.classList.remove('visible');
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Comprobando...';
+
+            try {
+                const res = await fetch('/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: document.getElementById('login-username').value,
+                        password: document.getElementById('login-password').value
+                    })
+                });
+                const data = await res.json();
+
+                if (res.ok && data.status === 'success') {
+                    window.location.href = '/';
+                    return;
+                }
+                errorBox.textContent = data.message || 'No se pudo iniciar sesión.';
+                errorBox.classList.add('visible');
+                document.getElementById('login-password').value = '';
+                document.getElementById('login-password').focus();
+            } catch (err) {
+                errorBox.textContent = 'No se pudo conectar con el servidor.';
+                errorBox.classList.add('visible');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Iniciar sesión';
+            }
+        });
+    </script>
+</body>
+</html>
