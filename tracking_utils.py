@@ -71,6 +71,93 @@ class TrackClassVoter:
 
 
 # ---------------------------------------------------------------------------
+# Histéresis de confianza por track
+# ---------------------------------------------------------------------------
+class TrackConfidenceGate:
+    """
+    Decide si la detección de un track debe mostrarse, aplicando histéresis
+    para evitar el parpadeo del recuadro durante oclusiones parciales.
+
+    Máquina de estados por track_id:
+
+        PENDIENTE ──(confianza ≥ activación, `confirm_frames` veces)──> CONFIRMADO
+        CONFIRMADO ──(confianza < mantenimiento, `grace_frames` seguidos)──> PENDIENTE
+
+    Un track CONFIRMADO conserva su recuadro mientras su confianza no baje del
+    umbral de mantenimiento. Y aunque lo baje, aguanta `grace_frames` más antes
+    de ocultarse: así una caída de uno o dos frames (un vehículo pasando bajo un
+    semáforo colgante) no interrumpe la superposición.
+    """
+
+    def __init__(self, confirm_frames: int = 2, grace_frames: int = 5):
+        """
+        Args:
+            confirm_frames: frames consecutivos sobre el umbral de activación
+                            necesarios para confirmar un track nuevo. Mayor →
+                            menos falsos positivos, más latencia al aparecer.
+            grace_frames:   frames que un track confirmado sigue mostrándose
+                            tras caer bajo el umbral de mantenimiento. Mayor →
+                            tolera oclusiones más largas, más riesgo de dejar
+                            un recuadro "pegado" a un objeto que ya se fue.
+        """
+        self.confirm_frames = confirm_frames
+        self.grace_frames = grace_frames
+        # {tid: nº de frames consecutivos sobre el umbral de activación}
+        self._hits: dict = defaultdict(int)
+        # {tid: True si el track ya está confirmado}
+        self._confirmed: dict = {}
+        # {tid: nº de frames consecutivos bajo el umbral de mantenimiento}
+        self._misses: dict = defaultdict(int)
+
+    def accept(self, tracker_id: int, class_id: int, confidence: float) -> bool:
+        """
+        Registra la detección de este frame y devuelve si debe dibujarse.
+        """
+        # Import local para no crear dependencia circular a nivel de módulo
+        from label_mapper import get_activation_threshold, get_keep_threshold
+
+        tid = int(tracker_id)
+        activation = get_activation_threshold(class_id)
+        keep = get_keep_threshold(class_id)
+
+        if self._confirmed.get(tid, False):
+            # Track ya visible: se aplica el umbral permisivo + margen de gracia
+            if confidence >= keep:
+                self._misses[tid] = 0
+                return True
+            self._misses[tid] += 1
+            if self._misses[tid] <= self.grace_frames:
+                return True          # Caída transitoria: se sostiene el recuadro
+            # Caída sostenida: el track vuelve a estado pendiente
+            self._confirmed[tid] = False
+            self._hits[tid] = 0
+            self._misses[tid] = 0
+            return False
+
+        # Track aún no confirmado: se exige el umbral estricto varias veces
+        if confidence >= activation:
+            self._hits[tid] += 1
+            if self._hits[tid] >= self.confirm_frames:
+                self._confirmed[tid] = True
+                self._misses[tid] = 0
+                return True
+        else:
+            self._hits[tid] = 0
+        return False
+
+    def is_confirmed(self, tracker_id: int) -> bool:
+        """True si el track está actualmente en estado visible."""
+        return self._confirmed.get(int(tracker_id), False)
+
+    def purge(self, keep_ids: set):
+        """Elimina el estado de tracks que ya no están activos ni perdidos."""
+        for store in (self._hits, self._confirmed, self._misses):
+            for tid in list(store.keys()):
+                if tid not in keep_ids:
+                    del store[tid]
+
+
+# ---------------------------------------------------------------------------
 # Desambiguación de clase por geometría del bounding box
 # ---------------------------------------------------------------------------
 def disambiguate_class(class_id: int, xyxy: np.ndarray, frame_shape: tuple) -> int:

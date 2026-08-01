@@ -138,6 +138,26 @@ CLASS_CONFIDENCE_THRESHOLDS = {
 # Umbral global predeterminado para clases no listadas arriba
 DEFAULT_CONFIDENCE_THRESHOLD = 0.35
 
+# ---------------------------------------------------------------------------
+# Histéresis de confianza
+#
+# Un umbral único produce parpadeo: cuando un objeto se ocluye parcialmente
+# (pasa bajo un semáforo colgante, tras un cable o un poste) su confianza cae
+# unas décimas y la detección se descarta, aunque el tracker siga siguiéndolo
+# sin problema. Al despejarse la oclusión vuelve a superar el umbral y el
+# recuadro reaparece.
+#
+# Con histéresis se usan dos umbrales:
+#   - ACTIVAR:  el umbral por clase de arriba. Exigente, evita falsos positivos.
+#   - MANTENER: KEEP_RATIO del anterior. Permisivo, sostiene el recuadro de un
+#               track ya confirmado durante caídas transitorias de confianza.
+# ---------------------------------------------------------------------------
+KEEP_THRESHOLD_RATIO = 0.55
+
+# Suelo absoluto: por muy bajo que quede el umbral de mantenimiento, nunca se
+# sostiene un recuadro por debajo de este valor.
+MIN_KEEP_THRESHOLD = 0.15
+
 
 def get_label_es(class_id: int, model_names: dict = None) -> str:
     """
@@ -152,10 +172,37 @@ def get_label_es(class_id: int, model_names: dict = None) -> str:
     return f"cls_{class_id}"
 
 
-def should_show_detection(class_id: int, confidence: float) -> bool:
+def get_activation_threshold(class_id: int) -> float:
+    """
+    Umbral de confianza necesario para ACTIVAR (empezar a mostrar) una
+    detección de esta clase.
+    """
+    return CLASS_CONFIDENCE_THRESHOLDS.get(class_id, DEFAULT_CONFIDENCE_THRESHOLD)
+
+
+def get_keep_threshold(class_id: int) -> float:
+    """
+    Umbral de confianza necesario para MANTENER visible una detección cuyo
+    track ya fue confirmado. Más permisivo que el de activación: sostiene el
+    recuadro durante oclusiones parciales breves.
+    """
+    return max(MIN_KEEP_THRESHOLD,
+               get_activation_threshold(class_id) * KEEP_THRESHOLD_RATIO)
+
+
+def should_show_detection(class_id: int, confidence: float,
+                          is_confirmed: bool = False) -> bool:
     """
     Determina si una detección debe mostrarse según el umbral de confianza
     por clase. Suprime falsos positivos de clases poco probables.
+
+    Args:
+        class_id:     índice de clase COCO
+        confidence:   confianza de la detección
+        is_confirmed: True si el track ya venía mostrándose. En ese caso se
+                      aplica el umbral de mantenimiento (más permisivo) en
+                      lugar del de activación.
     """
-    threshold = CLASS_CONFIDENCE_THRESHOLDS.get(class_id, DEFAULT_CONFIDENCE_THRESHOLD)
+    threshold = get_keep_threshold(class_id) if is_confirmed \
+        else get_activation_threshold(class_id)
     return confidence >= threshold

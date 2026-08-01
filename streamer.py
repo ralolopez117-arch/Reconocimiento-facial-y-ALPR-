@@ -7,8 +7,9 @@ from ultralytics import YOLO
 from config_manager import get_display_settings
 from alpr_engine import process_plate_image
 from fr_engine import process_person_image
-from label_mapper import get_label_es, should_show_detection
-from tracking_utils import TrackClassVoter, disambiguate_class, render_ghost_tracks
+from label_mapper import get_label_es
+from tracking_utils import (TrackClassVoter, TrackConfidenceGate,
+                            disambiguate_class, render_ghost_tracks)
 
 def generate_frames(stream_source, model_path="yolov8n.pt", cam_id=None):
     from background_processor import background_manager
@@ -30,6 +31,10 @@ def generate_frames(stream_source, model_path="yolov8n.pt", cam_id=None):
 
     # Votación temporal de clase por track para estabilizar etiquetas oscilantes
     class_voter = TrackClassVoter(window=12)
+
+    # Histéresis de confianza: evita que el recuadro parpadee cuando la confianza
+    # cae momentáneamente por una oclusión parcial (semáforo colgante, cable, poste)
+    conf_gate = TrackConfidenceGate(confirm_frames=2, grace_frames=5)
 
     # Historial de último frame visto y última clase por track_id
     # Usado por render_ghost_tracks para dibujar posiciones predichas en oclusión
@@ -89,11 +94,17 @@ def generate_frames(stream_source, model_path="yolov8n.pt", cam_id=None):
         detections = sv.Detections.from_ultralytics(results)
         detections = tracker.update_with_detections(detections)
 
-        # --- Filtro de confianza por clase (suprime falsos positivos) ---
+        # --- Filtro de confianza por clase con histéresis ---
+        # Un track nuevo debe superar el umbral estricto de su clase para
+        # aparecer; una vez confirmado, se mantiene visible con un umbral mucho
+        # más bajo. Esto impide que el recuadro desaparezca cuando un vehículo
+        # pasa bajo un semáforo colgante y su confianza cae unas décimas.
         if detections.tracker_id is not None and len(detections) > 0:
             keep_mask = np.array([
-                should_show_detection(int(cls), float(conf))
-                for cls, conf in zip(detections.class_id, detections.confidence)
+                conf_gate.accept(int(tid), int(cls), float(conf))
+                for tid, cls, conf in zip(detections.tracker_id,
+                                          detections.class_id,
+                                          detections.confidence)
             ], dtype=bool)
             detections = detections[keep_mask]
 
@@ -264,7 +275,12 @@ def generate_frames(stream_source, model_path="yolov8n.pt", cam_id=None):
                     if tid not in ghost_keep:
                         track_last_seen.pop(tid, None)
                         track_last_class.pop(tid, None)
-                class_voter.purge(active_ids)
+                # Purgar con ghost_keep (activos + perdidos), no solo con los
+                # activos: un track ocluido sigue vivo en el tracker y debe
+                # conservar su voto de clase y su estado de confirmación para
+                # reaparecer sin parpadear ni cambiar de etiqueta.
+                class_voter.purge(ghost_keep)
+                conf_gate.purge(ghost_keep)
         except Exception as e:
             print(f"Speed annotation error: {e}")
 
