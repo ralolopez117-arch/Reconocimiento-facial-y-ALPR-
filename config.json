@@ -41,6 +41,6 @@
         "min_confidence": 0.8
     },
     "security_settings": {
-        "session_timeout_minutes": 15
+        "session_timeout_minutes": 5
     }
 }
