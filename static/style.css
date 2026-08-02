@@ -1020,6 +1020,21 @@ body.is-admin .admin-only {
 
 .fr-tab-content.active {
     display: block;
+
+    /* El modal es flex en columna con max-height: sin estas tres reglas el
+       contenido de la pestaña crece por encima del alto disponible y el último
+       elemento se sale del panel.
+
+       min-height: 0 es imprescindible: por defecto un elemento flex no encoge
+       por debajo de su contenido, así que sin esto overflow-y nunca llega a
+       actuar y la barra de desplazamiento no aparece. */
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+
+    /* Aire al final para que el último control no quede pegado al borde
+       cuando la pestaña está desplazada hasta abajo. */
+    padding-bottom: 4px;
 }
 
 /* --- Danger Button --- */
