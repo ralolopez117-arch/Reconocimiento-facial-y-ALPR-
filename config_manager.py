@@ -1,43 +1,115 @@
+"""
+config_manager.py
+-----------------
+Configuración local de la instalación: cámaras registradas y preferencias
+globales.
+
+config.json NO se versiona, porque contiene las URLs de las cámaras y sus
+credenciales ONVIF. Por eso una instalación recién clonada no lo tiene, y este
+módulo lo crea con valores por defecto la primera vez que se consulta. Así el
+programa arranca sin pasos previos y las cámaras se añaden desde la interfaz.
+"""
+
+import copy
 import json
 import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 
+# ---------------------------------------------------------------------------
+# Valores por defecto
+#
+# Definidos en un solo sitio y reutilizados tanto al crear el archivo como al
+# completar los ajustes que falten en uno ya existente. Antes cada función
+# llevaba su propia copia, que podía quedar desincronizada.
+# ---------------------------------------------------------------------------
+DEFAULT_DISPLAY_SETTINGS = {
+    "show_fps": True,
+    "show_labels": True,
+    "show_speed": False,
+}
+
+DEFAULT_ALPR_SETTINGS = {
+    "plate_format": "generic",
+    "min_confidence": 0.5,
+}
+
+DEFAULT_SECURITY_SETTINGS = {
+    "session_timeout_minutes": 15,
+}
+
+DEFAULT_DETECTION_MODE = "monitored"
+
+DEFAULT_CONFIG = {
+    # Sin cámaras: se registran desde la interfaz
+    "cameras": [],
+    "display_settings": DEFAULT_DISPLAY_SETTINGS,
+    "detection_mode": DEFAULT_DETECTION_MODE,
+    "alpr_settings": DEFAULT_ALPR_SETTINGS,
+    "security_settings": DEFAULT_SECURITY_SETTINGS,
+}
+
+
+def default_config():
+    """Copia profunda de la configuración por defecto, segura de modificar."""
+    return copy.deepcopy(DEFAULT_CONFIG)
+
+
 def load_config():
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, "r") as f:
-                data = json.load(f)
-                # Migrate old "streams" format to "cameras"
-                if "streams" in data:
-                    data["cameras"] = []
-                    for i, s in enumerate(data.pop("streams")):
-                        data["cameras"].append({
-                            "id": f"cam_migrated_{i}",
-                            "name": f"Camera {i+1}",
-                            "type": "IP" if "://" in str(s) or "." in str(s) else "USB",
-                            "source": s
-                        })
-                    save_config(data)
-                return data
-        except Exception as e:
-            print(f"Error loading config: {e}")
-            return {"cameras": []}
-    return {"cameras": []}
+    """
+    Devuelve la configuración, creando el archivo si aún no existe.
+
+    Crear el archivo desde una función de lectura es deliberado: es el único
+    punto por el que pasan todos los accesos, así que garantiza que una
+    instalación nueva quede configurada en el primer arranque sin que el
+    usuario tenga que copiar ninguna plantilla.
+    """
+    if not os.path.exists(CONFIG_FILE):
+        config = default_config()
+        save_config(config)
+        print(f"[Config] Archivo de configuración creado: {CONFIG_FILE}")
+        return config
+
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        # No se sobrescribe un archivo ilegible: puede contener las cámaras del
+        # usuario y ser recuperable a mano. Se trabaja con los valores por
+        # defecto durante esta ejecución.
+        print(f"[Config] No se pudo leer {CONFIG_FILE}: {e}")
+        print("[Config] Se usarán los valores por defecto sin tocar el archivo.")
+        return default_config()
+
+    # Migrate old "streams" format to "cameras"
+    if "streams" in data:
+        data["cameras"] = []
+        for i, s in enumerate(data.pop("streams")):
+            data["cameras"].append({
+                "id": f"cam_migrated_{i}",
+                "name": f"Camera {i+1}",
+                "type": "IP" if "://" in str(s) or "." in str(s) else "USB",
+                "source": s
+            })
+        save_config(data)
+
+    return data
+
 
 def save_config(config):
     try:
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(config, f, indent=4)
+        # ensure_ascii=False mantiene legibles los nombres con tildes o eñes
+        # en lugar de escaparlos como á.
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=4, ensure_ascii=False)
     except Exception as e:
         print(f"Error saving config: {e}")
 
 def get_display_settings():
     config = load_config()
-    defaults = {"show_fps": True, "show_labels": True, "show_speed": True}
     stored = config.get("display_settings", {})
-    return {**defaults, **stored}
+    return {**DEFAULT_DISPLAY_SETTINGS, **stored}
 
 def save_display_settings(settings):
     config = load_config()
@@ -55,9 +127,8 @@ def get_alpr_settings():
     min_confidence: confianza mínima del OCR para considerar un texto.
     """
     config = load_config()
-    defaults = {"plate_format": "generic", "min_confidence": 0.5}
     stored = config.get("alpr_settings", {})
-    return {**defaults, **stored}
+    return {**DEFAULT_ALPR_SETTINGS, **stored}
 
 
 def save_alpr_settings(settings):
@@ -75,9 +146,8 @@ def get_security_settings():
                              Mientras haya una cámara abierta no caduca nunca.
     """
     config = load_config()
-    defaults = {"session_timeout_minutes": 15}
     stored = config.get("security_settings", {})
-    return {**defaults, **stored}
+    return {**DEFAULT_SECURITY_SETTINGS, **stored}
 
 
 def save_security_settings(settings):
@@ -88,7 +158,7 @@ def save_security_settings(settings):
 
 def get_detection_mode():
     config = load_config()
-    return config.get("detection_mode", "monitored")
+    return config.get("detection_mode", DEFAULT_DETECTION_MODE)
 
 def save_detection_mode(mode):
     if mode not in ["monitored", "all"]:
