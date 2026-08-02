@@ -534,9 +534,27 @@ body {
 }
 
 .login-logo {
-    font-size: 40px;
-    line-height: 1;
-    margin-bottom: 12px;
+    display: block;
+    width: 96px;
+    height: 96px;
+    margin: 0 auto 14px;
+    /* El logo lleva un aro luminoso propio; este halo lo continúa sobre el
+       fondo de la tarjeta en lugar de recortarlo en seco. */
+    filter: drop-shadow(0 4px 14px rgba(45, 212, 191, 0.28));
+}
+
+/* Logo compacto de la barra superior */
+.nav-logo {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    /* El icono es oscuro por dentro: en tema claro necesita un contorno tenue
+       para no quedar como una mancha sobre la barra blanca. */
+    filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.35));
+}
+
+:root[data-theme="light"] .nav-logo {
+    filter: drop-shadow(0 1px 3px rgba(15, 23, 42, 0.25));
 }
 
 .login-brand h1 {
