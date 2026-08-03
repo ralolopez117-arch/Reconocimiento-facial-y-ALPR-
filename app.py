@@ -15,6 +15,8 @@ from plate_types import (ANY_TYPE, list_types, is_known_type, describe_mismatch,
 from streamer import generate_frames
 import database
 from background_processor import background_manager
+import camera_health
+from camera_health import health_monitor
 from ptz_control import get_ptz_controller
 
 app = Flask(__name__)
@@ -29,6 +31,9 @@ auth.init_preferences()
 
 # Start background processor manager
 background_manager.start()
+
+# Vigilancia del estado de las cámaras para el indicador de la lista
+health_monitor.start()
 
 
 @app.before_request
@@ -212,6 +217,21 @@ def get_cameras():
     config = load_config()
     return jsonify(config.get("cameras", []))
 
+@app.route('/api/cameras/status', methods=['GET'])
+@login_required
+def get_cameras_status():
+    """
+    Estado en línea de cada cámara, para el indicador de la lista.
+
+    Devuelve lo que el monitor tiene cacheado: no sondea durante la petición,
+    porque abrir un stream puede tardar segundos y bloquearía la respuesta.
+    """
+    cameras = load_config().get("cameras", [])
+    return jsonify({
+        'cameras': health_monitor.get_status(cameras),
+        'check_interval_seconds': int(camera_health.CHECK_INTERVAL),
+    })
+
 @app.route('/api/cameras', methods=['POST'])
 @admin_required
 def add_camera():
@@ -231,6 +251,9 @@ def add_camera():
     config.setdefault("cameras", []).append(new_cam)
     save_config(config)
     background_manager.sync_with_config()
+    # Comprobar ya, para no dejar el indicador en "sin comprobar" hasta la
+    # siguiente ronda periódica
+    health_monitor.refresh_soon()
     return jsonify(new_cam)
 
 @app.route('/api/cameras/<cam_id>', methods=['PUT'])
@@ -251,6 +274,9 @@ def edit_camera(cam_id):
             break
     save_config(config)
     background_manager.sync_with_config()
+    # La fuente puede haber cambiado: el estado cacheado ya no es válido
+    health_monitor.forget(cam_id)
+    health_monitor.refresh_soon()
     return jsonify({"status": "success"})
 
 @app.route('/api/cameras/<cam_id>', methods=['DELETE'])
@@ -260,6 +286,7 @@ def delete_camera(cam_id):
     config["cameras"] = [c for c in config.get("cameras", []) if c["id"] != cam_id]
     save_config(config)
     background_manager.sync_with_config()
+    health_monitor.forget(cam_id)
     return jsonify({"status": "success"})
 
 @app.route('/api/display_settings', methods=['GET'])
@@ -632,6 +659,7 @@ def video_feed(cam_id):
         """
         for chunk in generate_frames(source, cam_id=cam_id):
             auth.touch_stream_activity(sid)
+            health_monitor.report_alive(cam_id)
             yield chunk
 
     return Response(tracked_frames(),

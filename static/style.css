@@ -201,7 +201,10 @@ body {
     margin-bottom: 4px;
 }
 
-.cam-info span {
+/* Solo el hijo directo: es la etiqueta de tipo (IP / USB). Sin el ">" también
+   alcanzaba a los <span> anidados en el <h4> — el punto de estado y la insignia
+   PTZ — imponiéndoles su relleno y su fondo. */
+.cam-info > span {
     font-size: 12px;
     color: var(--text-muted);
     background: var(--surface-sunken);
@@ -658,6 +661,53 @@ body.is-admin .admin-only {
 
 .user-chip .user-role.admin {
     color: var(--primary);
+}
+
+/* Indicador de estado al inicio del nombre de la cámara */
+.cam-status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 7px;
+    border-radius: 50%;
+    /* Sin esto el punto se alinea con la base del texto y queda bajo */
+    vertical-align: middle;
+    position: relative;
+    top: -1px;
+    flex-shrink: 0;
+    background: var(--text-muted);
+    transition: background 0.3s, box-shadow 0.3s;
+}
+
+.cam-status-dot.online {
+    background: #22c55e;
+    /* Halo tenue: ayuda a distinguirlo de un gris apagado de un vistazo */
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
+}
+
+.cam-status-dot.offline {
+    background: #64748b;
+    box-shadow: none;
+}
+
+/* Aún sin comprobar: late despacio para indicar que hay algo en curso, en
+   lugar de parecer una cámara caída. */
+.cam-status-dot.unknown {
+    background: #94a3b8;
+    animation: latido-estado 1.6s ease-in-out infinite;
+}
+
+@keyframes latido-estado {
+    0%, 100% { opacity: 0.35; }
+    50%      { opacity: 0.9; }
+}
+
+/* Quien prefiera no ver animaciones recibe un punto estático legible */
+@media (prefers-reduced-motion: reduce) {
+    .cam-status-dot.unknown {
+        animation: none;
+        opacity: 0.6;
+    }
 }
 
 /* Buscador de cámaras en la barra lateral */

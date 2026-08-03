@@ -6,6 +6,10 @@ const IS_ADMIN = document.body.dataset.role === 'admin';
 document.addEventListener('DOMContentLoaded', () => {
     fetchCameras();
     fetchDisplaySettings();
+    fetchCameraStatus();
+    // El servidor comprueba cada 30 s; se consulta a mitad de ese ritmo para
+    // que un cambio de estado tarde poco en verse sin recargar de más.
+    setInterval(fetchCameraStatus, 15000);
     if (IS_ADMIN) fetchDetectionSettings();
     startSessionWatch();
     setLayout(4); // Build initial 4-cell grid
@@ -81,6 +85,49 @@ async function fetchDetectionSettings() {
     }
 }
 
+// ---- Estado en línea de las cámaras ----
+// El servidor sondea en segundo plano; aquí solo se consulta lo que ya tiene
+// cacheado, así que este sondeo es barato.
+
+let cameraStatus = {};
+
+const ETIQUETAS_ESTADO = {
+    online:  { texto: 'En servicio',   clase: 'online' },
+    offline: { texto: 'Fuera de servicio', clase: 'offline' },
+    unknown: { texto: 'Comprobando…',  clase: 'unknown' },
+};
+
+function renderStatusDot(salud) {
+    const info = ETIQUETAS_ESTADO[salud.status] || ETIQUETAS_ESTADO.unknown;
+
+    // Detalle en el tooltip: sin él, un punto gris no distingue "caída" de
+    // "aún no comprobada".
+    let detalle = info.texto;
+    if (salud.streaming) {
+        detalle = 'En servicio · emitiendo ahora';
+    } else if (salud.status === 'online' && salud.latency_ms != null) {
+        detalle = `En servicio · respondió en ${salud.latency_ms} ms`;
+    }
+    if (salud.checked_seconds_ago != null) {
+        detalle += ` · comprobada hace ${salud.checked_seconds_ago} s`;
+    }
+
+    return `<span class="cam-status-dot ${info.clase}" title="${detalle}"
+                  role="img" aria-label="${info.texto}"></span>`;
+}
+
+async function fetchCameraStatus() {
+    try {
+        const res = await fetch('/api/cameras/status');
+        if (!res.ok) return;
+        const data = await res.json();
+        cameraStatus = data.cameras || {};
+        renderCameraList();
+    } catch (e) {
+        // Un fallo puntual de red no debe borrar los indicadores existentes
+    }
+}
+
 function renderCameraList() {
     const list = document.getElementById('camera-list');
     const filtro = (document.getElementById('camera-search-input')?.value || '')
@@ -109,6 +156,8 @@ function renderCameraList() {
         li.ondragstart = (e) => e.dataTransfer.setData('text/plain', JSON.stringify(cam));
 
         const ptzBadge = cam.is_ptz ? '<span class="ptz-badge">PTZ</span>' : '';
+        const salud = cameraStatus[cam.id] || { status: 'unknown' };
+        const punto = renderStatusDot(salud);
         // Editar y eliminar solo para administradores. El operador ve la lista
         // y puede arrastrar cámaras a la cuadrícula, pero no modificarlas.
         const acciones = IS_ADMIN ? `
@@ -120,7 +169,7 @@ function renderCameraList() {
 
         li.innerHTML = `
             <div class="cam-info">
-                <h4>${cam.name} ${ptzBadge}</h4>
+                <h4>${punto}${cam.name} ${ptzBadge}</h4>
                 <span>${cam.type}</span>
             </div>
             ${acciones}
