@@ -78,7 +78,7 @@ class CameraWorker(threading.Thread):
 
             # Process every Nth frame to reduce load if necessary, e.g. every frame or every 2nd frame
             try:
-                results = model.predict(frame, verbose=False, imgsz=480)
+                results = model.predict(frame, verbose=False)
                 detections = sv.Detections.from_ultralytics(results)
                 detections = tracker.update_with_detections(detections)
 

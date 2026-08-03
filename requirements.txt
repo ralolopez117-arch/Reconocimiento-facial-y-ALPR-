@@ -3,6 +3,27 @@ ultralytics
 opencv-python
 numpy
 
+# ---------------------------------------------------------------------------
+# GPU (opcional)
+#
+# Por defecto pip instala PyTorch compilado solo para CPU y todo funciona, pero
+# sin acelerar. Para usar una GPU NVIDIA hay que instalar la compilación CUDA
+# desde el índice de PyTorch, ANTES o DESPUÉS de este requirements:
+#
+#   pip install --index-url https://download.pytorch.org/whl/cu126 \
+#       torch==2.13.0+cu126 torchvision==0.28.0+cu126
+#
+# torchvision debe venir del mismo índice: con la versión de CPU, su operador
+# nms no tiene núcleo CUDA y la inferencia falla al filtrar detecciones.
+#
+# En Windows, Smart App Control bloquea las DLL de CUDA por no estar firmadas.
+# Si torch deja de importar con un error de "directiva de Control de
+# aplicaciones", hay que desactivarlo en Seguridad de Windows. Ojo: Microsoft
+# no permite reactivarlo sin reinstalar el sistema.
+#
+# El código detecta la GPU solo, sin configuración: ver model_cache.py.
+# ---------------------------------------------------------------------------
+
 # supervision se fija por debajo de 0.30: sv.ByteTrack está obsoleto desde
 # 0.28.0 y se elimina en 0.30.0. Sin este tope, un "pip install -U" rompería
 # el seguimiento por completo.

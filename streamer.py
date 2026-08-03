@@ -91,8 +91,9 @@ def generate_frames(stream_source, model_path="yolov8n.pt", cam_id=None):
         if frame_count % 30 == 1:
             display = get_display_settings()
 
-        # Inference (imgsz=480 for better CPU performance)
-        results = model.predict(frame, verbose=False, imgsz=480)
+        # La resolución la decide model_cache según el dispositivo: 640 en
+        # GPU, donde sale casi gratis, y 480 en CPU.
+        results = model.predict(frame, verbose=False)
         
         detections = sv.Detections.from_ultralytics(results)
         detections = tracker.update_with_detections(detections)
