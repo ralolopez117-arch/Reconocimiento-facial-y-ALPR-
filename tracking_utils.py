@@ -259,6 +259,42 @@ def disambiguate_class(class_id: int, xyxy: np.ndarray, frame_shape: tuple) -> i
 
 
 # ---------------------------------------------------------------------------
+# Identificador de un track interno del tracker
+# ---------------------------------------------------------------------------
+
+# Valor con el que ByteTrack marca un track que aún no tiene identificador
+# público, por no haber superado minimum_consecutive_frames.
+_SIN_ID = -1
+
+
+def get_track_id(track):
+    """
+    Devuelve el identificador público de un track interno de ByteTrack.
+
+    El nombre del atributo cambió entre versiones de supervision: en 0.29 los
+    objetos STrack exponen `external_track_id` (el que acaba en
+    detections.tracker_id) e `internal_track_id`, mientras que versiones
+    anteriores usaban `track_id`. Se prueban ambos para no depender de una
+    versión concreta.
+
+    Returns:
+        int con el identificador, o None si el track todavía no tiene uno
+        asignado o el objeto no expone ninguno reconocible.
+    """
+    for atributo in ("external_track_id", "track_id"):
+        valor = getattr(track, atributo, None)
+        if valor is None:
+            continue
+        try:
+            valor = int(valor)
+        except (TypeError, ValueError):
+            continue
+        if valor != _SIN_ID:
+            return valor
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Ghost box rendering — muestra posición predicha de tracks perdidos
 # ---------------------------------------------------------------------------
 
@@ -270,6 +306,9 @@ GHOST_MAX_FRAMES = 25
 
 # Color del ghost box: naranja ámbar para distinguirlo de detecciones reales
 GHOST_COLOR = (0, 165, 255)   # BGR: naranja
+
+# Errores ya avisados, para no repetir el mismo mensaje en cada fotograma
+_errores_ghost_avisados = set()
 
 
 def _draw_dashed_rect(img: np.ndarray, x1: int, y1: int, x2: int, y2: int,
@@ -373,7 +412,9 @@ def render_ghost_tracks(
 
     for lost_track in lost_tracks:
         try:
-            tid = int(lost_track.track_id)
+            tid = get_track_id(lost_track)
+            if tid is None:
+                continue
             last_seen = track_last_seen.get(tid)
             if last_seen is None:
                 continue
@@ -397,6 +438,14 @@ def render_ghost_tracks(
 
             draw_ghost_box(img, x1, y1, x2, y2, label=ghost_label, alpha=alpha)
 
-        except Exception:
-            # Nunca romper el stream por un ghost box fallido
-            pass
+        except Exception as e:
+            # Un ghost box fallido no debe romper el stream, pero tampoco puede
+            # desaparecer sin dejar rastro: al tragarse la excepción en silencio,
+            # un cambio de nombre de atributo en supervision dejó esta función
+            # sin dibujar nada durante mucho tiempo sin que nadie lo notara.
+            # Se informa una sola vez por tipo de error para no inundar la
+            # consola, ya que esto corre en cada fotograma.
+            firma = f"{type(e).__name__}: {e}"
+            if firma not in _errores_ghost_avisados:
+                _errores_ghost_avisados.add(firma)
+                print(f"[GhostTracks] Ghost box omitido — {firma}")

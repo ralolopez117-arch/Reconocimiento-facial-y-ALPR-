@@ -9,7 +9,8 @@ from alpr_engine import process_plate_image
 from fr_engine import process_person_image
 from label_mapper import get_label_es
 from tracking_utils import (TrackClassVoter, TrackConfidenceGate,
-                            disambiguate_class, render_ghost_tracks)
+                            disambiguate_class, render_ghost_tracks,
+                            get_track_id)
 
 def generate_frames(stream_source, model_path="yolov8n.pt", cam_id=None):
     from background_processor import background_manager
@@ -269,7 +270,9 @@ def generate_frames(stream_source, model_path="yolov8n.pt", cam_id=None):
                     if tid not in active_ids:
                         del fr_scanned_ids[tid]
                 # Purgar historial de ghost tracking (solo ids ya no activos NI perdidos)
-                lost_ids = {int(t.track_id) for t in getattr(tracker, 'lost_tracks', [])}
+                lost_ids = {tid for tid in
+                            (get_track_id(t) for t in getattr(tracker, 'lost_tracks', []))
+                            if tid is not None}
                 ghost_keep = active_ids | lost_ids
                 for tid in list(track_last_seen.keys()):
                     if tid not in ghost_keep:
