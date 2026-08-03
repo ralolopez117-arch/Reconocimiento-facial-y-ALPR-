@@ -389,11 +389,27 @@ body {
     -webkit-user-drag: none;
 }
 
-/* Modo "rellenar": la imagen cubre todo el panel recortando lo que sobra por
-   los lados. Útil cuando la proporción del panel no coincide con la de la
-   cámara y las franjas negras molestan. */
+/* Modo "rellenar": la imagen cubre todo el panel recortando lo que sobre.
+   Ocupa también la franja de la cabecera, por dos motivos: aprovecha todo el
+   alto disponible —lo que reduce cuánto hay que recortar— y evita que el
+   recorte se coma justo la parte pegada a la cabecera, que es lo que da la
+   impresión de que la está tapando. */
 .video-cell.fit-cover img {
     object-fit: cover;
+    top: 0;
+    height: 100%;
+}
+
+/* Con la imagen a pantalla completa, una cabecera fija sí taparía vídeo. Se
+   desvanece y reaparece al acercar el ratón o al enfocar con el teclado. */
+.video-cell.fit-cover .camera-header {
+    opacity: 0;
+    transition: opacity 0.25s;
+}
+
+.video-cell.fit-cover:hover .camera-header,
+.video-cell.fit-cover:focus-within .camera-header {
+    opacity: 1;
 }
 
 /* Selector de encuadre, abajo a la derecha del panel */
