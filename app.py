@@ -307,6 +307,8 @@ def update_settings():
         "show_fps": bool(data.get("show_fps", current["show_fps"])),
         "show_labels": bool(data.get("show_labels", current["show_labels"])),
         "show_speed": bool(data.get("show_speed", current["show_speed"])),
+        "show_ghost_boxes": bool(data.get("show_ghost_boxes",
+                                          current["show_ghost_boxes"])),
     })
     save_display_settings(current)
     return jsonify({"status": "success"})

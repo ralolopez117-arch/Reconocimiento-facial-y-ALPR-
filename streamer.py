@@ -164,12 +164,18 @@ def _bucle_de_video(grabber, model, tracker, class_voter, conf_gate,
         # Solo se muestran tracks perdidos recientemente (hasta GHOST_MAX_FRAMES).
         # Se pasan las cajas ya dibujadas para que no se superponga un fantasma
         # sobre un objeto que el seguidor ya está siguiendo con otro id.
-        render_ghost_tracks(
-            annotated_frame, tracker, frame_count,
-            track_last_seen, track_last_class,
-            get_label_fn=get_label_es,
-            active_boxes=detections.xyxy if len(detections) > 0 else None,
-        )
+        #
+        # Desactivado por defecto: es una ayuda de diagnóstico. Ocultarlo no
+        # afecta al seguimiento durante una oclusión, que depende del
+        # lost_track_buffer de ByteTrack y de la histéresis de confianza, no de
+        # que se dibuje nada.
+        if display.get("show_ghost_boxes", False):
+            render_ghost_tracks(
+                annotated_frame, tracker, frame_count,
+                track_last_seen, track_last_class,
+                get_label_fn=get_label_es,
+                active_boxes=detections.xyxy if len(detections) > 0 else None,
+            )
 
         # Check if background processor is already executing ALPR/FR for this camera
         is_bg_active = cam_id and background_manager.is_camera_running_in_background(cam_id)

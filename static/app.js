@@ -38,6 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupToggle('toggle-fps',    'show_fps');
     setupToggle('toggle-labels', 'show_labels');
     setupToggle('toggle-speed',  'show_speed');
+    setupToggle('toggle-ghost',  'show_ghost_boxes');
 
     // Detection mode radios
     document.querySelectorAll('input[name="detection_mode"]').forEach(radio => {
@@ -627,6 +628,7 @@ async function fetchDisplaySettings() {
     document.getElementById('toggle-fps').checked    = settings.show_fps;
     document.getElementById('toggle-labels').checked = settings.show_labels;
     document.getElementById('toggle-speed').checked  = settings.show_speed;
+    document.getElementById('toggle-ghost').checked  = settings.show_ghost_boxes;
 }
 
 function setupToggle(checkboxId, settingKey) {

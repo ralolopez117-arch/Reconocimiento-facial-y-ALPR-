@@ -28,6 +28,11 @@ DEFAULT_DISPLAY_SETTINGS = {
     "show_fps": True,
     "show_labels": True,
     "show_speed": False,
+    # Recuadros discontinuos con la posición predicha de un objeto ocluido.
+    # Apagados por defecto: son una ayuda de diagnóstico y en escenas con
+    # varios objetos ensucian la imagen. Ocultarlos no afecta al seguimiento,
+    # que mantiene los tracks perdidos por su cuenta.
+    "show_ghost_boxes": False,
 }
 
 DEFAULT_ALPR_SETTINGS = {
