@@ -1,6 +1,6 @@
 import easyocr
 from database import insert_plate, check_plate_against_watchlist, insert_plate_alert
-from ultralytics import YOLO
+from model_cache import get_model
 from plate_format import normalize, select_best_plate
 from config_manager import get_alpr_settings
 import os
@@ -8,7 +8,7 @@ import os
 # Initialize models
 print("Loading ALPR Engine (Dual-Model)...")
 plate_model_path = os.path.join(os.path.dirname(__file__), "license_plate_detector.pt")
-plate_model = YOLO(plate_model_path) if os.path.exists(plate_model_path) else None
+plate_model = get_model(plate_model_path) if os.path.exists(plate_model_path) else None
 
 reader = easyocr.Reader(['en'], gpu=True) # It will fallback to CPU if no GPU
 print("ALPR Engine loaded.")
@@ -36,7 +36,7 @@ def process_plate_image(vehicle_crop, camera_id, confidence_threshold=None):
         
         # Step 1: Detect Plate using YOLO
         if plate_model:
-            results = plate_model(vehicle_crop, verbose=False)[0]
+            results = plate_model.predict(vehicle_crop, verbose=False)
             if len(results.boxes) == 0:
                 return [] # No plate detected by YOLO
             

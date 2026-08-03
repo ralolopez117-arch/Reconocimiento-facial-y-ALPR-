@@ -2,7 +2,7 @@ import time
 import threading
 import cv2
 import supervision as sv
-from ultralytics import YOLO
+from model_cache import get_model
 
 from config_manager import load_config, get_detection_mode
 from alpr_engine import process_plate_image
@@ -24,7 +24,7 @@ class CameraWorker(threading.Thread):
         print(f"[BackgroundProcessor] Worker started for camera: {self.camera_info.get('name', self.cam_id)}")
         
         try:
-            model = YOLO(self.model_path)
+            model = get_model(self.model_path)
             tracker = sv.ByteTrack()
         except Exception as e:
             print(f"[BackgroundProcessor] Failed to load YOLO/ByteTrack for camera {self.cam_id}: {e}")
@@ -78,7 +78,7 @@ class CameraWorker(threading.Thread):
 
             # Process every Nth frame to reduce load if necessary, e.g. every frame or every 2nd frame
             try:
-                results = model(frame, verbose=False, imgsz=480)[0]
+                results = model.predict(frame, verbose=False, imgsz=480)
                 detections = sv.Detections.from_ultralytics(results)
                 detections = tracker.update_with_detections(detections)
 

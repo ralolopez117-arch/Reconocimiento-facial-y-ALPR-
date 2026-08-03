@@ -3,7 +3,7 @@ import math
 import cv2
 import numpy as np
 import supervision as sv
-from ultralytics import YOLO
+from model_cache import get_model
 from config_manager import get_display_settings
 from alpr_engine import process_plate_image
 from fr_engine import process_person_image
@@ -14,7 +14,9 @@ from tracking_utils import (TrackClassVoter, TrackConfidenceGate,
 
 def generate_frames(stream_source, model_path="yolov8n.pt", cam_id=None):
     from background_processor import background_manager
-    model = YOLO(model_path)
+    # Instancia compartida: antes cada conexión HTTP creaba su propio YOLO,
+    # así que la cuadrícula de 8 cámaras mantenía 8 copias del mismo modelo.
+    model = get_model(model_path)
 
     # --- Tuned ByteTrack parameters ---
     # lost_track_buffer: frames a mantener un track perdido antes de eliminarlo.
@@ -90,7 +92,7 @@ def generate_frames(stream_source, model_path="yolov8n.pt", cam_id=None):
             display = get_display_settings()
 
         # Inference (imgsz=480 for better CPU performance)
-        results = model(frame, verbose=False, imgsz=480)[0]
+        results = model.predict(frame, verbose=False, imgsz=480)
         
         detections = sv.Detections.from_ultralytics(results)
         detections = tracker.update_with_detections(detections)
@@ -136,7 +138,7 @@ def generate_frames(stream_source, model_path="yolov8n.pt", cam_id=None):
 
         if display.get("show_labels", True):
             labels = [
-                f"#{tracker_id} {get_label_es(class_id, model.model.names)} {confidence:.2f}"
+                f"#{tracker_id} {get_label_es(class_id, model.names)} {confidence:.2f}"
                 for class_id, confidence, tracker_id
                 in zip(detections.class_id, detections.confidence, detections.tracker_id)
             ]
