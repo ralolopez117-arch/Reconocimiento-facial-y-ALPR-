@@ -20,3 +20,6 @@ config.json
 venv/
 .venv/
 env/
+
+# Modelos descargados bajo demanda por ultralytics (no son fuente del proyecto)
+yolov8n-seg.pt
