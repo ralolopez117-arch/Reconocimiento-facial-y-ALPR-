@@ -9,6 +9,7 @@ from config_manager import (load_config, save_config, get_display_settings,
                             save_security_settings)
 import auth
 from auth import login_required, admin_required
+import audit
 from plate_format import PLATE_PATTERNS, list_formats
 from plate_types import (ANY_TYPE, list_types, is_known_type, describe_mismatch,
                          country_has_specific_types)
@@ -29,6 +30,7 @@ app.permanent_session_lifetime = datetime.timedelta(days=7)
 
 auth.init_users()
 auth.init_preferences()
+audit.init_audit()
 
 # Start background processor manager
 background_manager.start()
@@ -81,16 +83,21 @@ def login():
                                                 user['password_hash']):
         # El mismo mensaje para usuario inexistente y contraseña incorrecta:
         # distinguirlos permitiría averiguar qué usuarios existen.
+        audit.log(audit.SESSION_LOGIN_FAILED,
+                  target=(data.get('username') or '')[:60],
+                  username=(data.get('username') or '?'), role='')
         return jsonify({'status': 'error',
                         'message': 'Usuario o contraseña incorrectos'}), 401
 
     auth.start_session(user)
+    audit.log(audit.SESSION_LOGIN, target=user['username'])
     return jsonify({'status': 'success', 'role': user['role'],
                     'username': user['username']})
 
 
 @app.route('/logout')
 def logout():
+    audit.log(audit.SESSION_LOGOUT)
     auth.end_session()
     return redirect(url_for('login'))
 
@@ -148,6 +155,69 @@ def index():
     return render_template('index.html', user=user, is_admin=auth.is_admin(),
                            theme=prefs['theme'])
 
+@app.route('/api/detections/summary', methods=['GET'])
+@login_required
+def get_detections_summary():
+    """Cuántos registros de detección hay de cada tipo."""
+    return jsonify({
+        'plates': database.count_plates(),
+        'faces': database.count_face_detections(),
+        'alerts': database.count_plate_alerts(),
+    })
+
+@app.route('/api/plates', methods=['DELETE'])
+@admin_required
+def clear_plate_detections():
+    """
+    Vacía el historial de matrículas leídas.
+
+    No toca la lista de vigilancia: son las placas que se buscan, no el
+    historial de lo detectado.
+    """
+    n = database.delete_all_plates()
+    audit.log(audit.DETECTIONS_PLATES_CLEARED, details={'eliminados': n})
+    return jsonify({'status': 'success', 'deleted': n})
+
+@app.route('/api/faces/detections', methods=['DELETE'])
+@admin_required
+def clear_face_detections():
+    """
+    Vacía el historial de rostros detectados.
+
+    No toca los rostros registrados: son las personas que se buscan.
+    """
+    n = database.delete_all_face_detections()
+    audit.log(audit.DETECTIONS_FACES_CLEARED, details={'eliminados': n})
+    return jsonify({'status': 'success', 'deleted': n})
+
+@app.route('/api/plate_alerts', methods=['DELETE'])
+@admin_required
+def clear_plate_alerts():
+    """Vacía el historial de alertas de placas vigiladas."""
+    n = database.delete_all_plate_alerts()
+    audit.log(audit.DETECTIONS_ALERTS_CLEARED, details={'eliminadas': n})
+    return jsonify({'status': 'success', 'deleted': n})
+
+@app.route('/api/audit_log', methods=['GET'])
+@admin_required
+def get_audit_log():
+    """
+    Registro de acciones administrativas.
+
+    No existe endpoint para borrarlo a propósito: un historial que el propio
+    administrador puede vaciar no sirve para auditar.
+    """
+    return jsonify({
+        'entries': audit.get_entries(
+            limit=min(request.args.get('limit', 100, type=int), 500),
+            action=request.args.get('action') or None,
+            username=request.args.get('username') or None,
+            search=request.args.get('q') or None,
+        ),
+        'total': audit.count_entries(),
+        'actions': audit.list_actions(),
+    })
+
 @app.route('/api/users', methods=['GET'])
 @admin_required
 def get_users():
@@ -166,6 +236,8 @@ def add_user():
                                       data.get('role', auth.ROLE_OPERATOR))
     if error:
         return jsonify({'status': 'error', 'message': error}), 400
+    audit.log(audit.USER_ADDED, target=data.get('username', ''),
+              details={'rol': data.get('role', auth.ROLE_OPERATOR)})
     return jsonify({'status': 'success', 'id': user_id})
 
 @app.route('/api/users/<int:user_id>', methods=['PUT'])
@@ -181,6 +253,10 @@ def edit_user(user_id):
     # de inmediato o seguiría viendo la interfaz de administrador sin permisos.
     if user_id == session.get('user_id') and data.get('role'):
         session['role'] = data['role']
+    objetivo = auth.get_user(user_id) or {}
+    audit.log(audit.USER_EDITED, target=objetivo.get('username', user_id),
+              details={'rol': data.get('role'),
+                       'contrasena_cambiada': bool(data.get('password'))})
     return jsonify({'status': 'success'})
 
 @app.route('/api/users/<int:user_id>', methods=['DELETE'])
@@ -189,9 +265,11 @@ def remove_user(user_id):
     if user_id == session.get('user_id'):
         return jsonify({'status': 'error',
                         'message': 'No puedes eliminar tu propio usuario'}), 400
+    objetivo = auth.get_user(user_id) or {}
     error = auth.delete_user(user_id)
     if error:
         return jsonify({'status': 'error', 'message': error}), 400
+    audit.log(audit.USER_DELETED, target=objetivo.get('username', user_id))
     return jsonify({'status': 'success'})
 
 @app.route('/api/security_settings', methods=['GET'])
@@ -213,6 +291,7 @@ def update_security_config():
                         'message': 'El tiempo debe estar entre 0 y 1440 minutos'}), 400
 
     save_security_settings({'session_timeout_minutes': minutes})
+    audit.log(audit.SETTINGS_SECURITY, target=f'{minutes} min')
     return jsonify({'status': 'success', 'session_timeout_minutes': minutes})
 
 @app.route('/api/cameras', methods=['GET'])
@@ -258,6 +337,9 @@ def add_camera():
     # Comprobar ya, para no dejar el indicador en "sin comprobar" hasta la
     # siguiente ronda periódica
     health_monitor.refresh_soon()
+    audit.log(audit.CAMERA_ADDED, target=new_cam['name'],
+              details={'id': new_cam['id'], 'tipo': new_cam['type'],
+                       'ptz': new_cam['is_ptz']})
     return jsonify(new_cam)
 
 @app.route('/api/cameras/<cam_id>', methods=['PUT'])
@@ -281,16 +363,23 @@ def edit_camera(cam_id):
     # La fuente puede haber cambiado: el estado cacheado ya no es válido
     health_monitor.forget(cam_id)
     health_monitor.refresh_soon()
+    audit.log(audit.CAMERA_EDITED, target=data.get('name', cam_id),
+              details={'id': cam_id})
     return jsonify({"status": "success"})
 
 @app.route('/api/cameras/<cam_id>', methods=['DELETE'])
 @admin_required
 def delete_camera(cam_id):
     config = load_config()
+    # Se guarda antes de borrar para poder dejar constancia de qué se eliminó;
+    # después ya no habría forma de saberlo.
+    eliminada = next((c for c in config.get("cameras", []) if c["id"] == cam_id), None)
     config["cameras"] = [c for c in config.get("cameras", []) if c["id"] != cam_id]
     save_config(config)
     background_manager.sync_with_config()
     health_monitor.forget(cam_id)
+    audit.log(audit.CAMERA_DELETED, target=(eliminada or {}).get('name', cam_id),
+              details={'id': cam_id, 'fuente': (eliminada or {}).get('source', '')})
     return jsonify({"status": "success"})
 
 @app.route('/api/display_settings', methods=['GET'])
@@ -311,6 +400,7 @@ def update_settings():
                                           current["show_ghost_boxes"])),
     })
     save_display_settings(current)
+    audit.log(audit.SETTINGS_DISPLAY, details=current)
     return jsonify({"status": "success"})
 
 @app.route('/api/detection_settings', methods=['GET'])
@@ -326,6 +416,7 @@ def update_detection_settings():
     if mode in ["monitored", "all"]:
         save_detection_mode(mode)
         background_manager.set_mode(mode)
+        audit.log(audit.SETTINGS_DETECTION, target=mode)
         return jsonify({"status": "success", "detection_mode": mode})
     return jsonify({"status": "error", "message": "Invalid detection mode"}), 400
 
@@ -373,6 +464,8 @@ def update_alpr_config():
         "plate_format": plate_format,
         "min_confidence": min_confidence,
     })
+    audit.log(audit.SETTINGS_ALPR, target=plate_format,
+              details={'confianza_minima': min_confidence})
     return jsonify({"status": "success", "plate_format": plate_format,
                     "min_confidence": min_confidence})
 
@@ -479,6 +572,7 @@ def register_face():
         os.makedirs("static/faces", exist_ok=True)
         with open(f"static/faces/{face_id}.jpg", "wb") as f:
             f.write(image_bytes)
+        audit.log(audit.FACE_REGISTERED, target=name, details={'id': face_id})
         return jsonify({"status": "success", "message": msg})
     else:
         return jsonify({"status": "error", "message": msg}), 400
@@ -528,6 +622,7 @@ def delete_face(face_id):
     database.delete_known_face(face_id)
     import fr_engine
     fr_engine.invalidate_known_faces_cache()
+    audit.log(audit.FACE_DELETED, target=face_id)
     import os
     try:
         os.remove(f"static/faces/{face_id}.jpg")
@@ -538,9 +633,11 @@ def delete_face(face_id):
 @app.route('/api/faces/known', methods=['DELETE'])
 @admin_required
 def delete_all_faces():
+    n = len(database.get_all_known_faces())
     database.delete_all_known_faces()
     import fr_engine
     fr_engine.invalidate_known_faces_cache()
+    audit.log(audit.FACES_CLEARED, details={'eliminados': n})
     import os
     import glob
     for f in glob.glob("static/faces/*.jpg"):
@@ -614,6 +711,8 @@ def add_watched_plate():
         return jsonify({'status': 'error', 'message': error}), 400
     database.insert_watched_plate(payload['pattern'], payload['note'],
                                   payload['plate_type'], payload['country'])
+    audit.log(audit.PLATE_WATCH_ADDED, target=payload['pattern'],
+              details={'tipo': payload['plate_type'], 'pais': payload['country']})
     return jsonify({'status': 'success', 'warning': payload['warning']})
 
 @app.route('/api/watched_plates/<int:plate_id>', methods=['PUT'])
@@ -624,18 +723,23 @@ def update_watched_plate(plate_id):
         return jsonify({'status': 'error', 'message': error}), 400
     database.update_watched_plate(plate_id, payload['pattern'], payload['note'],
                                   payload['plate_type'], payload['country'])
+    audit.log(audit.PLATE_WATCH_EDITED, target=payload['pattern'],
+              details={'id': plate_id, 'tipo': payload['plate_type']})
     return jsonify({'status': 'success', 'warning': payload['warning']})
 
 @app.route('/api/watched_plates/<int:plate_id>', methods=['DELETE'])
 @admin_required
 def delete_watched_plate(plate_id):
     database.delete_watched_plate(plate_id)
+    audit.log(audit.PLATE_WATCH_DELETED, target=plate_id)
     return jsonify({'status': 'success'})
 
 @app.route('/api/watched_plates', methods=['DELETE'])
 @admin_required
 def delete_all_watched_plates():
+    n = len(database.get_all_watched_plates())
     database.delete_all_watched_plates()
+    audit.log(audit.PLATE_WATCH_CLEARED, details={'eliminadas': n})
     return jsonify({'status': 'success'})
 
 @app.route('/api/plate_alerts/latest', methods=['GET'])

@@ -903,6 +903,7 @@ document.querySelectorAll('.fr-tab').forEach(btn => {
         if (btn.dataset.tab === 'alpr-tab-detections') fetchLatestPlates();
         if (btn.dataset.tab === 'settings-tab-users') fetchUsers();
         if (btn.dataset.tab === 'settings-tab-session') fetchSecuritySettings();
+        if (btn.dataset.tab === 'settings-tab-audit') fetchAuditLog();
     });
 });
 
@@ -1577,4 +1578,153 @@ if (IS_ADMIN) {
         .addEventListener('input', (e) => renderTimeoutLabel(e.target.value));
     document.getElementById('session-timeout-range')
         .addEventListener('change', saveSecuritySettings);
+}
+
+
+// ===========================================================================
+//  Limpieza de detecciones y registro de auditoría
+// ===========================================================================
+
+/**
+ * Pide confirmación indicando cuántos registros se van a borrar y lo ejecuta.
+ * Se consulta el recuento antes de preguntar para que la confirmación diga una
+ * cifra concreta en lugar de un genérico "¿seguro?".
+ */
+async function limpiarDetecciones(endpoint, clave, etiqueta, alRefrescar) {
+    let cuantos = null;
+    try {
+        const res = await fetch('/api/detections/summary');
+        if (res.ok) cuantos = (await res.json())[clave];
+    } catch (e) { /* si falla el recuento se pregunta igual */ }
+
+    if (cuantos === 0) {
+        showToast(`No hay ${etiqueta} que borrar.`);
+        return;
+    }
+
+    const cantidad = cuantos === null ? '' : ` (${cuantos})`;
+    if (!confirm(`¿Borrar todo el historial de ${etiqueta}${cantidad}?\n\n`
+               + 'Esta acción no se puede deshacer y queda anotada en el registro.')) {
+        return;
+    }
+
+    const res = await fetch(endpoint, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+        showToast(`Se borraron ${data.deleted ?? 0} registros de ${etiqueta}.`);
+        if (alRefrescar) alRefrescar();
+    } else {
+        alert(data.message || 'No se pudo borrar.');
+    }
+}
+
+if (IS_ADMIN) {
+    document.getElementById('alpr-clear-detections')
+        .addEventListener('click', () => limpiarDetecciones(
+            '/api/plates', 'plates', 'matrículas leídas', fetchLatestPlates));
+
+    document.getElementById('fr-clear-detections')
+        .addEventListener('click', () => limpiarDetecciones(
+            '/api/faces/detections', 'faces', 'rostros detectados', fetchLatestFaces));
+}
+
+// ---- Registro de auditoría ----
+
+let auditFiltroCargado = false;
+
+async function fetchAuditLog() {
+    const q = document.getElementById('audit-search').value.trim();
+    const accion = document.getElementById('audit-action-filter').value;
+
+    const params = new URLSearchParams({ limit: '200' });
+    if (q) params.set('q', q);
+    if (accion) params.set('action', accion);
+
+    const res = await fetch(`/api/audit_log?${params}`);
+    if (!res.ok) return;
+    const data = await res.json();
+
+    // El desplegable se llena una sola vez: recargarlo en cada búsqueda
+    // perdería la selección del usuario mientras escribe.
+    if (!auditFiltroCargado) {
+        const sel = document.getElementById('audit-action-filter');
+        (data.actions || []).forEach(a => {
+            const opt = document.createElement('option');
+            opt.value = a.key;
+            opt.textContent = a.label;
+            sel.appendChild(opt);
+        });
+        auditFiltroCargado = true;
+    }
+
+    document.getElementById('audit-count').textContent =
+        `Mostrando ${data.entries.length} de ${data.total} entradas registradas.`;
+
+    renderAuditLog(data.entries);
+}
+
+/**
+ * Pasa la marca de tiempo de la base de datos a dd/mm/aaaa.
+ *
+ * En la base se guarda como aaaa-mm-dd porque así ordena correctamente al
+ * comparar como texto; el cambio de formato es solo para mostrarlo. Se parte
+ * la cadena en lugar de usar Date, que interpretaría la hora como UTC y
+ * desplazaría la fecha según la zona horaria.
+ */
+function formatearFechaAuditoria(ts) {
+    if (!ts) return '';
+    const m = String(ts).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2}:\d{2})/);
+    if (!m) return ts;
+    const [, anio, mes, dia, hora] = m;
+    return `${dia}/${mes}/${anio} ${hora}`;
+}
+
+function renderAuditLog(entradas) {
+    const tbody = document.getElementById('audit-table-body');
+    tbody.innerHTML = '';
+
+    if (!entradas.length) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">'
+                        + 'Sin entradas que coincidan</td></tr>';
+        return;
+    }
+
+    entradas.forEach(e => {
+        // Los detalles se guardan como JSON; se muestran en forma legible
+        let detalle = e.target || '';
+        if (e.details) {
+            try {
+                const d = JSON.parse(e.details);
+                const partes = Object.entries(d)
+                    .filter(([, v]) => v !== null && v !== undefined && v !== '')
+                    .map(([k, v]) => `${k}: ${v}`);
+                if (partes.length) {
+                    detalle = detalle ? `${detalle} — ${partes.join(', ')}` : partes.join(', ');
+                }
+            } catch (err) {
+                detalle = detalle ? `${detalle} — ${e.details}` : e.details;
+            }
+        }
+
+        // Los accesos fallidos se destacan: son la señal que más importa revisar
+        const fallo = e.action === 'session.login_failed';
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td style="white-space:nowrap; color:var(--text-muted); font-size:0.85em;">${formatearFechaAuditoria(e.timestamp)}</td>
+            <td style="white-space:nowrap;"><strong>${e.username}</strong></td>
+            <td style="${fallo ? 'color:#f87171; font-weight:600;' : ''}">${e.action_label}</td>
+            <td style="color:var(--text-muted); font-size:0.9em;">${detalle}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+if (IS_ADMIN) {
+    // Buscar mientras se escribe, pero sin lanzar una consulta por tecla
+    let auditTimer = null;
+    document.getElementById('audit-search').addEventListener('input', () => {
+        clearTimeout(auditTimer);
+        auditTimer = setTimeout(fetchAuditLog, 300);
+    });
+    document.getElementById('audit-action-filter').addEventListener('change', fetchAuditLog);
 }

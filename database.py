@@ -135,6 +135,68 @@ def search_plates(query, limit=50):
 def get_latest_plates(limit=10):
     return search_plates("", limit)
 
+def count_plates():
+    conn = get_connection()
+    cursor = conn.cursor()
+    n = cursor.execute('SELECT COUNT(*) AS n FROM plates').fetchone()['n']
+    conn.close()
+    return n
+
+def delete_all_plates():
+    """
+    Vacía el historial de matrículas leídas.
+
+    Returns:
+        Número de registros eliminados, para poder dejarlo anotado en el
+        registro de auditoría.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    n = cursor.execute('SELECT COUNT(*) AS n FROM plates').fetchone()['n']
+    cursor.execute('DELETE FROM plates')
+    conn.commit()
+    conn.close()
+    return n
+
+def count_face_detections():
+    conn = get_connection()
+    cursor = conn.cursor()
+    n = cursor.execute('SELECT COUNT(*) AS n FROM face_detections').fetchone()['n']
+    conn.close()
+    return n
+
+def delete_all_face_detections():
+    """
+    Vacía el historial de rostros detectados.
+
+    No toca known_faces: son los rostros registrados para buscar, no el
+    historial de avistamientos.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    n = cursor.execute('SELECT COUNT(*) AS n FROM face_detections').fetchone()['n']
+    cursor.execute('DELETE FROM face_detections')
+    conn.commit()
+    conn.close()
+    return n
+
+def count_plate_alerts():
+    conn = get_connection()
+    cursor = conn.cursor()
+    n = cursor.execute('SELECT COUNT(*) AS n FROM plate_alerts').fetchone()['n']
+    conn.close()
+    return n
+
+def delete_all_plate_alerts():
+    """Vacía el historial de alertas de placas vigiladas."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    n = cursor.execute('SELECT COUNT(*) AS n FROM plate_alerts').fetchone()['n']
+    cursor.execute('DELETE FROM plate_alerts')
+    conn.commit()
+    conn.close()
+    return n
+
 # --- Facial Recognition Database Functions ---
 
 def insert_known_face(name, embedding_json):

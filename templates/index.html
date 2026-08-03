@@ -141,6 +141,11 @@
 
             <!-- Tab: Detecciones Generales -->
             <div id="alpr-tab-detections" class="fr-tab-content active">
+                <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+                    <button id="alpr-clear-detections" class="btn-danger admin-only"
+                            title="Borrar el historial de matriculas leidas">
+                        Limpiar detecciones</button>
+                </div>
                 <div class="alpr-search" style="margin-bottom: 12px;">
                     <input type="text" id="alpr-search-input" placeholder="🔍 Buscar por placa o cámara..." style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-color);">
                 </div>
@@ -276,6 +281,11 @@
 
             <!-- Tab: Detections -->
             <div id="fr-tab-detections" class="fr-tab-content">
+                <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+                    <button id="fr-clear-detections" class="btn-danger admin-only"
+                            title="Borrar el historial de rostros detectados">
+                        Limpiar detecciones</button>
+                </div>
                 <div class="alpr-table-container">
                     <table class="alpr-table">
                         <thead>
@@ -310,6 +320,7 @@
                 <button class="fr-tab admin-only" data-tab="settings-tab-plates">🚗 Placas</button>
                 <button class="fr-tab active" data-tab="settings-tab-display">👁 Visualización</button>
                 <button class="fr-tab admin-only" data-tab="settings-tab-users">👥 Usuarios</button>
+                <button class="fr-tab admin-only" data-tab="settings-tab-audit">Registro</button>
                 <button class="fr-tab admin-only" data-tab="settings-tab-session">🔒 Sesión</button>
             </div>
 
@@ -465,6 +476,45 @@
                             </tr>
                         </thead>
                         <tbody id="users-table-body">
+                            <!-- Filled by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Tab: Registro de auditoría (solo administrador) -->
+            <div id="settings-tab-audit" class="fr-tab-content">
+                <p class="settings-hint">
+                    Todas las acciones que modifican el sistema quedan anotadas: altas y
+                    bajas de cámaras, cambios de configuración, gestión de usuarios,
+                    borrado de registros y accesos. <strong>No se puede borrar</strong> desde
+                    la aplicación: un historial que el administrador puede vaciar no sirve
+                    para auditar.
+                </p>
+
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+                    <input type="text" id="audit-search" placeholder="🔍 Buscar en el registro..."
+                           style="flex:1 1 180px; padding:8px 12px; background:var(--bg-card);
+                                  border:1px solid var(--border-color); border-radius:6px;
+                                  color:var(--text-color); outline:none;">
+                    <select id="audit-action-filter" class="settings-select" style="flex:0 1 220px;">
+                        <option value="">Todas las acciones</option>
+                    </select>
+                </div>
+
+                <p id="audit-count" class="settings-field-desc" style="margin:0 0 8px;"></p>
+
+                <div class="alpr-table-container">
+                    <table class="alpr-table">
+                        <thead>
+                            <tr>
+                                <th style="white-space:nowrap;">Fecha y hora</th>
+                                <th>Usuario</th>
+                                <th>Acción</th>
+                                <th>Detalle</th>
+                            </tr>
+                        </thead>
+                        <tbody id="audit-table-body">
                             <!-- Filled by JS -->
                         </tbody>
                     </table>
