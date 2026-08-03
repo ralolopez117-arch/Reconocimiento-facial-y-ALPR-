@@ -242,7 +242,13 @@ def disambiguate_class(class_id: int, xyxy: np.ndarray, frame_shape: tuple) -> i
     #   Un tren real tapa la mayor parte del encuadre horizontalmente.
     # ------------------------------------------------------------------
     if class_id == CLS_TRAIN:
-        if rel_w < 0.35:
+        # El 0.35 original era demasiado exigente. Medido sobre una cámara de
+        # carretera real, un tractocamión con remolque cruzando el encuadre
+        # ocupa el 51% del ancho y se quedaba clasificado como tren, con lo que
+        # se le exigía el 0.85 de confianza reservado a los trenes y
+        # desaparecía. Un tren de verdad, visto desde una cámara de tráfico,
+        # atraviesa prácticamente todo el encuadre.
+        if rel_w < 0.80:
             return CLS_TRUCK
 
     # ------------------------------------------------------------------

@@ -103,23 +103,16 @@ def _bucle_de_video(grabber, model, tracker, class_voter, conf_gate,
         detections = sv.Detections.from_ultralytics(results)
         detections = tracker.update_with_detections(detections)
 
-        # --- Filtro de confianza por clase con histéresis ---
-        # Un track nuevo debe superar el umbral estricto de su clase para
-        # aparecer; una vez confirmado, se mantiene visible con un umbral mucho
-        # más bajo. Esto impide que el recuadro desaparezca cuando un vehículo
-        # pasa bajo un semáforo colgante y su confianza cae unas décimas.
-        if detections.tracker_id is not None and len(detections) > 0:
-            keep_mask = np.array([
-                conf_gate.accept(int(tid), int(cls), float(conf))
-                for tid, cls, conf in zip(detections.tracker_id,
-                                          detections.class_id,
-                                          detections.confidence)
-            ], dtype=bool)
-            detections = detections[keep_mask]
-
         # --- Desambiguación geométrica + votación temporal de clase ---
-        # Aplica reglas de tamaño/aspecto para corregir truck↔car, person↔moto, etc.
-        # luego estabiliza la clase mostrada mediante votación de los últimos 12 frames.
+        # Corrige confusiones frecuentes por tamaño y proporción (camión↔auto,
+        # tren↔camión, persona↔moto) y estabiliza la clase mostrada votando los
+        # últimos fotogramas.
+        #
+        # IMPRESCINDIBLE que esto vaya ANTES del filtro de confianza. Al revés,
+        # el umbral se aplicaba sobre la clase cruda: un tractocamión que YOLO
+        # etiqueta como "tren" con 0.79 de confianza se descartaba por no llegar
+        # al 0.85 que se exige a los trenes, y la regla que lo habría convertido
+        # en camión —umbral 0.35, que sí superaba— nunca llegaba a ejecutarse.
         if len(detections) > 0 and detections.tracker_id is not None:
             corrected_class_ids = []
             discard_mask = []
@@ -141,6 +134,22 @@ def _bucle_de_video(grabber, model, tracker, class_voter, conf_gate,
                     [cid for cid, keep in zip(corrected_class_ids, discard_mask) if keep],
                     dtype=np.int64
                 )
+
+        # --- Filtro de confianza por clase con histéresis ---
+        # Un track nuevo debe superar el umbral estricto de su clase para
+        # aparecer; una vez confirmado, se mantiene visible con un umbral mucho
+        # más bajo. Esto impide que el recuadro desaparezca cuando un vehículo
+        # pasa bajo un semáforo colgante y su confianza cae unas décimas.
+        #
+        # Se evalúa sobre la clase ya corregida, que es la que se va a mostrar.
+        if detections.tracker_id is not None and len(detections) > 0:
+            keep_mask = np.array([
+                conf_gate.accept(int(tid), int(cls), float(conf))
+                for tid, cls, conf in zip(detections.tracker_id,
+                                          detections.class_id,
+                                          detections.confidence)
+            ], dtype=bool)
+            detections = detections[keep_mask]
 
         if display.get("show_labels", True):
             labels = [
