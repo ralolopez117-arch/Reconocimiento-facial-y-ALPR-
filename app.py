@@ -17,6 +17,7 @@ import database
 from background_processor import background_manager
 import camera_health
 from camera_health import health_monitor
+from analysis_queue import analysis_queue
 from ptz_control import get_ptz_controller
 
 app = Flask(__name__)
@@ -34,6 +35,9 @@ background_manager.start()
 
 # Vigilancia del estado de las cámaras para el indicador de la lista
 health_monitor.start()
+
+# Hilos que ejecutan matrículas y rostros fuera del bucle de vídeo
+analysis_queue.start()
 
 
 @app.before_request

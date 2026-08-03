@@ -5,8 +5,8 @@ import numpy as np
 import supervision as sv
 from model_cache import get_model
 from config_manager import get_display_settings
-from alpr_engine import process_plate_image
-from fr_engine import process_person_image
+from analysis_queue import analysis_queue
+from frame_source import FrameGrabber
 from label_mapper import get_label_es
 from tracking_utils import (TrackClassVoter, TrackConfidenceGate,
                             disambiguate_class, render_ghost_tracks,
@@ -54,34 +54,36 @@ def generate_frames(stream_source, model_path="yolov8n.pt", cam_id=None):
     frame_count = 0
     display = get_display_settings()
 
-    if isinstance(stream_source, str) and stream_source.isdigit():
-        stream_source = int(stream_source)
+    # La lectura va en su propio hilo: cap.read() tarda entre 1 y 138 ms según
+    # la cámara, y hacerla aquí dejaba el acelerador parado toda esa espera.
+    # El try/finally garantiza que la fuente se libera al desconectarse el
+    # cliente; antes quedaba abierta indefinidamente.
+    grabber = FrameGrabber(stream_source).start()
+    try:
+        yield from _bucle_de_video(
+            grabber, model, tracker, class_voter, conf_gate,
+            track_last_seen, track_last_class, box_annotator, label_annotator,
+            fps_monitor, track_history, alpr_scanned_ids, fr_scanned_ids,
+            PIXELS_PER_METER, display, cam_id, stream_source,
+        )
+    finally:
+        grabber.stop()
 
-    cap = None
-    if isinstance(stream_source, str) and not stream_source.startswith(('rtsp://', 'http://', 'https://')):
-        test_streams = [f"http://{stream_source}", f"http://{stream_source}/video", f"rtsp://{stream_source}", f"rtsp://{stream_source}/video"]
-        for ts in test_streams:
-            cap = cv2.VideoCapture(ts)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            if cap.isOpened():
-                stream_source = ts
-                break
-            cap.release()
-            cap = None
-    else:
-        cap = cv2.VideoCapture(stream_source)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-    if cap is None or not cap.isOpened():
-        print(f"Failed to open stream: {stream_source}")
-        return
+def _bucle_de_video(grabber, model, tracker, class_voter, conf_gate,
+                    track_last_seen, track_last_class, box_annotator,
+                    label_annotator, fps_monitor, track_history,
+                    alpr_scanned_ids, fr_scanned_ids, PIXELS_PER_METER,
+                    display, cam_id, stream_source):
+    """Bucle de anotación y emisión. Separado para poder cerrar el lector."""
+    from background_processor import background_manager
+    frame_count = 0
 
     while True:
-        ret, frame = cap.read()
-        if not ret:
-            cap.release()
-            cap = cv2.VideoCapture(stream_source)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        frame = grabber.read(timeout=10.0)
+        if frame is None:
+            # Sin fotograma nuevo: puede ser un corte pasajero. El lector
+            # reintenta por su cuenta, así que basta con volver a esperar.
             continue
 
         fps_monitor.tick()
@@ -224,13 +226,16 @@ def generate_frames(stream_source, model_path="yolov8n.pt", cam_id=None):
                                 x2 = min(frame.shape[1], x2 + pad)
                                 
                                 if (y2 - y1) > 20 and (x2 - x1) > 20:
-                                    crop = frame[y1:y2, x1:x2]
+                                    # .copy() es imprescindible: el recorte se
+                                    # analiza en otro hilo y el fotograma
+                                    # original se reutiliza mientras tanto.
+                                    crop = frame[y1:y2, x1:x2].copy()
                                     target_cam_tag = str(cam_id) if cam_id else str(stream_source)
-                                    plates = process_plate_image(crop, target_cam_tag)
-                                    if plates:
-                                        alpr_scanned_ids[tracker_id] = current_time + 3.0
-                                    else:
-                                        alpr_scanned_ids[tracker_id] = current_time
+                                    analysis_queue.submit_plate(crop, target_cam_tag)
+                                    # Ya no se sabe aquí si se leyó algo, así que
+                                    # se aplica siempre la misma espera antes de
+                                    # reintentar sobre este mismo vehículo.
+                                    alpr_scanned_ids[tracker_id] = current_time
 
                         # FR Logic: class 0=person
                         if class_id == 0:
@@ -244,14 +249,13 @@ def generate_frames(stream_source, model_path="yolov8n.pt", cam_id=None):
                                 x2 = min(frame.shape[1], x2 + pad)
                                 
                                 if (y2 - y1) > 20 and (x2 - x1) > 20:
-                                    crop = frame[y1:y2, x1:x2]
-                                    crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                                    # cvtColor ya devuelve un array propio, así
+                                    # que no hace falta copiar de nuevo.
+                                    crop_rgb = cv2.cvtColor(frame[y1:y2, x1:x2],
+                                                            cv2.COLOR_BGR2RGB)
                                     target_cam_tag = str(cam_id) if cam_id else str(stream_source)
-                                    faces = process_person_image(crop_rgb, target_cam_tag)
-                                    if faces:
-                                        fr_scanned_ids[tracker_id] = current_time + 8.0
-                                    else:
-                                        fr_scanned_ids[tracker_id] = current_time
+                                    analysis_queue.submit_face(crop_rgb, target_cam_tag)
+                                    fr_scanned_ids[tracker_id] = current_time
 
 
             # Always update track history even when speed is hidden (for when it's re-enabled)
