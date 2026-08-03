@@ -94,6 +94,72 @@ COCO_ES = {
 }
 
 # ---------------------------------------------------------------------------
+# Clases que interesan en videovigilancia
+#
+# YOLOv8 reconoce las 80 clases de COCO, la mayoría irrelevantes aquí: semáforos,
+# tazas, sillas, plátanos. Detectarlas ensucia la imagen, gasta identificadores
+# de seguimiento y distrae de lo que importa.
+#
+# Se filtra en la propia inferencia, no después: ultralytics acepta la lista de
+# clases y así se ahorra también el descarte posterior de cajas.
+# ---------------------------------------------------------------------------
+
+# Personas
+CLASES_PERSONAS = {0}
+
+# Vehículos de transporte, terrestres y no terrestres. Tren, avión y barco
+# tienen umbrales altos más abajo, porque en cámaras urbanas casi siempre son
+# confusiones con camiones o estructuras.
+CLASES_VEHICULOS = {
+    1,   # Bicicleta
+    2,   # Auto
+    3,   # Motocicleta
+    4,   # Avión
+    5,   # Autobús
+    6,   # Tren
+    7,   # Camión
+    8,   # Barco
+}
+
+# Animales. Los exóticos llevan umbral alto: en un entorno urbano, una
+# detección de cebra o jirafa es casi con seguridad un error.
+CLASES_ANIMALES = {
+    14,  # Pájaro
+    15,  # Gato
+    16,  # Perro
+    17,  # Caballo
+    18,  # Oveja
+    19,  # Vaca
+    20,  # Elefante
+    21,  # Oso
+    22,  # Cebra
+    23,  # Jirafa
+}
+
+# Objetos potencialmente peligrosos.
+#
+# COCO NO incluye armas de fuego: no hay clase de pistola ni de rifle, así que
+# el modelo es incapaz de detectarlas por mucho que se ajuste. Lo más cercano
+# es el cuchillo, una clase pensada para escenas de cocina, poco fiable a
+# distancia y en exteriores. Se incluye con un umbral muy alto para que no
+# genere ruido, pero no debe confundirse con detección de armas real: eso exige
+# un modelo entrenado específicamente para ello.
+CLASES_OBJETOS_PELIGROSOS = {
+    43,  # Cuchillo
+}
+
+# Conjunto final que se pide al modelo
+ALLOWED_CLASS_IDS = sorted(
+    CLASES_PERSONAS | CLASES_VEHICULOS | CLASES_ANIMALES | CLASES_OBJETOS_PELIGROSOS
+)
+
+
+def is_allowed_class(class_id: int) -> bool:
+    """True si la clase entra en el filtro de videovigilancia."""
+    return int(class_id) in ALLOWED_CLASS_IDS
+
+
+# ---------------------------------------------------------------------------
 # Umbrales de confianza mínima por clase COCO
 #
 # Clases poco comunes en contextos urbanos/tráfico requieren mayor confianza
@@ -108,7 +174,6 @@ CLASS_CONFIDENCE_THRESHOLDS = {
     4:  0.80,   # Avión — necesita alta confianza (podría confundirse con drones/pájaros)
     6:  0.85,   # Tren — alta confianza para evitar tracto-camiones mal clasificados
     8:  0.80,   # Barco — alta confianza para evitar tanques de agua/tubos
-    12: 0.70,   # Parquímetro
 
     # Fauna salvaje — muy poco probable en cámaras de tráfico urbano
     20: 0.85,   # Elefante
@@ -116,24 +181,17 @@ CLASS_CONFIDENCE_THRESHOLDS = {
     22: 0.85,   # Cebra
     23: 0.85,   # Jirafa
 
-    # Artículos deportivos que pueden confundirse con otros objetos
-    29: 0.70,   # Frisbee
-    30: 0.70,   # Esquís
-    31: 0.70,   # Snowboard
-    37: 0.70,   # Tabla de surf
-
-    # Alimentos raramente visibles en cámaras de vigilancia exterior
-    46: 0.80,   # Plátano
-    47: 0.80,   # Manzana
-    48: 0.80,   # Sándwich
-    49: 0.80,   # Naranja
-    50: 0.80,   # Brócoli
-    51: 0.80,   # Zanahoria
-    52: 0.80,   # Perro caliente
-    53: 0.80,   # Pizza
-    54: 0.80,   # Dona
-    55: 0.80,   # Pastel
+    # Objetos potencialmente peligrosos. El cuchillo de COCO se entrenó sobre
+    # escenas de cocina, así que en exteriores confunde con facilidad barras,
+    # antenas y reflejos alargados. Umbral muy alto para que solo pase lo
+    # evidente.
+    43: 0.85,   # Cuchillo
 }
+
+# Nota: aquí solo tiene sentido listar clases incluidas en ALLOWED_CLASS_IDS.
+# Las demás ni siquiera llegan a evaluarse, porque se descartan durante la
+# inferencia. Antes había umbrales para parquímetros, frisbees y alimentos que
+# ya no pueden aparecer, y se han retirado para no dar a entender lo contrario.
 
 # Umbral global predeterminado para clases no listadas arriba
 DEFAULT_CONFIDENCE_THRESHOLD = 0.35

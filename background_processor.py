@@ -8,6 +8,7 @@ from config_manager import load_config, get_detection_mode
 from frame_source import FrameGrabber
 from alpr_engine import process_plate_image
 from fr_engine import process_person_image, has_known_faces
+from label_mapper import ALLOWED_CLASS_IDS
 
 class CameraWorker(threading.Thread):
     def __init__(self, camera_info, model_path="yolov8n.pt"):
@@ -55,7 +56,8 @@ class CameraWorker(threading.Thread):
 
             # Process every Nth frame to reduce load if necessary, e.g. every frame or every 2nd frame
             try:
-                results = model.predict(frame, verbose=False)
+                results = model.predict(frame, verbose=False,
+                                        classes=ALLOWED_CLASS_IDS)
                 detections = sv.Detections.from_ultralytics(results)
                 detections = tracker.update_with_detections(detections)
 

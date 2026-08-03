@@ -8,7 +8,7 @@ from config_manager import get_display_settings
 from analysis_queue import analysis_queue
 from fr_engine import has_known_faces
 from frame_source import FrameGrabber
-from label_mapper import get_label_es
+from label_mapper import get_label_es, ALLOWED_CLASS_IDS
 from tracking_utils import (TrackClassVoter, TrackConfidenceGate,
                             disambiguate_class, render_ghost_tracks,
                             get_track_id)
@@ -96,7 +96,9 @@ def _bucle_de_video(grabber, model, tracker, class_voter, conf_gate,
 
         # La resolución la decide model_cache según el dispositivo: 640 en
         # GPU, donde sale casi gratis, y 480 en CPU.
-        results = model.predict(frame, verbose=False)
+        # classes filtra dentro de la inferencia: descarta semáforos, tazas
+        # y demás antes de generar cajas, en vez de tirarlas después.
+        results = model.predict(frame, verbose=False, classes=ALLOWED_CLASS_IDS)
         
         detections = sv.Detections.from_ultralytics(results)
         detections = tracker.update_with_detections(detections)
