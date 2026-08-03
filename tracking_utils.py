@@ -93,8 +93,8 @@ class TrackIdStabilizer:
     porque arrastraría el error a las lecturas de matrícula asociadas al track.
     """
 
-    def __init__(self, max_gap_frames: int = 45, max_distance_ratio: float = 2.5,
-                 max_size_ratio: float = 2.0):
+    def __init__(self, max_gap_frames: int = 45, max_distance_ratio: float = 1.2,
+                 max_size_ratio: float = 1.6, margen_ambiguedad: float = 1.8):
         """
         Args:
             max_gap_frames:     fotogramas que se recuerda un track desaparecido
@@ -102,10 +102,16 @@ class TrackIdStabilizer:
                                 predicha y la nueva, en múltiplos del tamaño
                                 del objeto
             max_size_ratio:     cambio de tamaño máximo admitido entre ambos
+            margen_ambiguedad:  cuántas veces mejor debe ser el mejor candidato
+                                frente al segundo para aceptarlo. Si dos tracks
+                                perdidos explican igual de bien la aparición, no
+                                se remapea nada.
         """
         self.max_gap_frames = max_gap_frames
         self.max_distance_ratio = max_distance_ratio
         self.max_size_ratio = max_size_ratio
+        self.margen_ambiguedad = margen_ambiguedad
+        self.descartes_por_ambiguedad = 0
 
         # {tid: {"centro", "tam", "vel", "frame", "clase"}}
         self._ultimo = {}
@@ -134,29 +140,46 @@ class TrackIdStabilizer:
             return tracker_ids
 
         activos = {int(t) for t in tracker_ids}
-        salida = []
+        salida = [None] * len(tracker_ids)
 
-        for tid, caja, cls in zip(tracker_ids, boxes, class_ids):
+        # Identificadores ya ocupados en ESTE fotograma. Sin llevar esta cuenta,
+        # dos apariciones que encajan con el mismo track perdido recibían ambas
+        # su identificador y dos vehículos distintos acababan compartiéndolo.
+        ocupados = set()
+        pendientes = []
+
+        # Primera pasada: resolver lo ya decidido y reservar sus identificadores
+        for i, (tid, caja, cls) in enumerate(zip(tracker_ids, boxes, class_ids)):
             tid = int(tid)
-
-            # Ya se decidió antes que este identificador continúa otro
             if tid in self._remapeo:
-                salida.append(self._remapeo[tid])
-                continue
+                salida[i] = self._remapeo[tid]
+                ocupados.add(salida[i])
+            elif tid in self._conocidos:
+                salida[i] = tid
+                ocupados.add(tid)
+            else:
+                pendientes.append((i, tid, caja, cls))
 
-            if tid in self._conocidos:
-                salida.append(tid)
-                continue
+        # Segunda pasada: decidir las apariciones nuevas, de la más cercana a su
+        # candidato a la más lejana, para que ante competencia gane la mejor
+        propuestas = []
+        for i, tid, caja, cls in pendientes:
+            cand, dist = self._buscar_continuacion(caja, cls, frame_count, activos)
+            propuestas.append((dist if cand is not None else float("inf"),
+                               i, tid, cand))
+        propuestas.sort(key=lambda p: p[0])
 
-            # Identificador nuevo: buscar a qué track perdido puede continuar
-            candidato = self._buscar_continuacion(caja, cls, frame_count, activos)
-            if candidato is not None:
-                self._remapeo[tid] = candidato
+        for _, i, tid, cand in propuestas:
+            # Un track perdido solo puede continuarse una vez por fotograma
+            if cand is not None and cand not in ocupados:
+                self._remapeo[tid] = cand
                 self.recuperados += 1
-                salida.append(candidato)
+                salida[i] = cand
+                ocupados.add(cand)
             else:
                 self._conocidos.add(tid)
-                salida.append(tid)
+                salida[i] = tid
+                ocupados.add(tid)
 
         # Actualizar la última posición conocida de cada track ya traducido
         for tid_final, caja, cls in zip(salida, boxes, class_ids):
@@ -166,9 +189,13 @@ class TrackIdStabilizer:
         return salida
 
     def _buscar_continuacion(self, caja, cls, frame_count, activos):
+        """
+        Returns:
+            (tid_candidato, distancia) o (None, inf) si no hay uno claro.
+        """
         centro, ancho, alto = self._centro_y_tam(caja)
         tam = ancho * alto
-        mejor, mejor_dist = None, float("inf")
+        candidatos = []
 
         for tid, info in self._ultimo.items():
             # Un track que sigue vivo este fotograma no puede continuarse
@@ -192,10 +219,32 @@ class TrackIdStabilizer:
             if dist > max(ancho, alto) * self.max_distance_ratio:
                 continue
 
-            if dist < mejor_dist:
-                mejor, mejor_dist = tid, dist
+            # Coherencia de sentido: el desplazamiento desde la última posición
+            # conocida debe ir en la dirección en que circulaba. Sin esto, en un
+            # cruce de carriles opuestos un vehículo podía heredar el
+            # identificador del que venía de frente.
+            vx, vy = info["vel"]
+            if math.hypot(vx, vy) > 1.0:
+                dx = centro[0] - info["centro"][0]
+                dy = centro[1] - info["centro"][1]
+                if dx * vx + dy * vy <= 0:
+                    continue
 
-        return mejor
+            candidatos.append((dist, tid))
+
+        if not candidatos:
+            return None, float("inf")
+
+        candidatos.sort()
+        # Si el segundo candidato explica la aparición casi tan bien como el
+        # primero, no hay forma de saber cuál es: se deja el identificador
+        # nuevo. Equivocarse aquí intercambia vehículos, y ese error se
+        # propagaría a las matrículas asociadas al track.
+        if len(candidatos) > 1 and candidatos[1][0] < candidatos[0][0] * self.margen_ambiguedad:
+            self.descartes_por_ambiguedad += 1
+            return None, float("inf")
+
+        return candidatos[0][1], candidatos[0][0]
 
     def _registrar(self, tid, caja, cls, frame_count):
         centro, ancho, alto = self._centro_y_tam(caja)
