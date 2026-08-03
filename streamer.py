@@ -10,8 +10,8 @@ from fr_engine import has_known_faces
 from frame_source import FrameGrabber
 from label_mapper import get_label_es, ALLOWED_CLASS_IDS
 from tracking_utils import (TrackClassVoter, TrackConfidenceGate,
-                            disambiguate_class, render_ghost_tracks,
-                            get_track_id)
+                            TrackIdStabilizer, disambiguate_class,
+                            render_ghost_tracks, get_track_id)
 
 def generate_frames(stream_source, model_path="yolov8n.pt", cam_id=None):
     from background_processor import background_manager
@@ -58,6 +58,10 @@ def generate_frames(stream_source, model_path="yolov8n.pt", cam_id=None):
     # cae momentáneamente por una oclusión parcial (semáforo colgante, cable, poste)
     conf_gate = TrackConfidenceGate(confirm_frames=2, grace_frames=5)
 
+    # Devuelve su identificador original a un vehículo que el seguidor dio
+    # por nuevo tras una oclusión o un salto grande entre fotogramas.
+    id_stabilizer = TrackIdStabilizer()
+
     # Historial de último frame visto y última clase por track_id
     # Usado por render_ghost_tracks para dibujar posiciones predichas en oclusión
     track_last_seen  = {}   # {tid: frame_count}
@@ -80,7 +84,7 @@ def generate_frames(stream_source, model_path="yolov8n.pt", cam_id=None):
     grabber = FrameGrabber(stream_source).start()
     try:
         yield from _bucle_de_video(
-            grabber, model, tracker, class_voter, conf_gate,
+            grabber, model, tracker, class_voter, conf_gate, id_stabilizer,
             track_last_seen, track_last_class, box_annotator, label_annotator,
             fps_monitor, track_history, alpr_scanned_ids, fr_scanned_ids,
             PIXELS_PER_METER, display, cam_id, stream_source,
@@ -90,6 +94,7 @@ def generate_frames(stream_source, model_path="yolov8n.pt", cam_id=None):
 
 
 def _bucle_de_video(grabber, model, tracker, class_voter, conf_gate,
+                    id_stabilizer,
                     track_last_seen, track_last_class, box_annotator,
                     label_annotator, fps_monitor, track_history,
                     alpr_scanned_ids, fr_scanned_ids, PIXELS_PER_METER,
@@ -120,6 +125,15 @@ def _bucle_de_video(grabber, model, tracker, class_voter, conf_gate,
         
         detections = sv.Detections.from_ultralytics(results)
         detections = tracker.update_with_detections(detections)
+
+        # Recuperar identificadores antes de cualquier paso que los use: la
+        # votación de clase, la histéresis y el control de reescaneo de ALPR
+        # y rostros dependen todos de que el identificador sea estable.
+        if len(detections) > 0 and detections.tracker_id is not None:
+            detections.tracker_id = np.array(
+                id_stabilizer.apply(detections.tracker_id, detections.xyxy,
+                                    detections.class_id, frame_count),
+                dtype=np.int64)
 
         # --- Desambiguación geométrica + votación temporal de clase ---
         # Corrige confusiones frecuentes por tamaño y proporción (camión↔auto,

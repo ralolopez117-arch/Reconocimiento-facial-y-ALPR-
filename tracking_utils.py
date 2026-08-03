@@ -71,6 +71,155 @@ class TrackClassVoter:
 
 
 # ---------------------------------------------------------------------------
+# Recuperación del identificador tras perder un track
+# ---------------------------------------------------------------------------
+class TrackIdStabilizer:
+    """
+    Reasigna a un track recién creado el identificador de otro que acababa de
+    perderse en el mismo sitio.
+
+    ByteTrack asocia por solapamiento de cajas. Cuando un vehículo se ocluye y
+    reaparece desplazado, o cuando avanza mucho entre dos fotogramas, el
+    solapamiento no basta y el seguidor lo da por objeto nuevo: es lo que hace
+    que un auto pase de #99 a #111 mientras cruza la imagen.
+
+    Aquí se guarda dónde estaba cada track al desaparecer y con qué velocidad
+    iba. Si poco después surge un identificador nuevo cerca de donde ese track
+    debería estar, con tamaño y clase parecidos, se entiende que es el mismo
+    objeto y se le devuelve su identificador original.
+
+    Es deliberadamente conservador: ante la duda deja el identificador nuevo.
+    Confundir dos vehículos distintos es peor que mostrar un número cambiado,
+    porque arrastraría el error a las lecturas de matrícula asociadas al track.
+    """
+
+    def __init__(self, max_gap_frames: int = 45, max_distance_ratio: float = 2.5,
+                 max_size_ratio: float = 2.0):
+        """
+        Args:
+            max_gap_frames:     fotogramas que se recuerda un track desaparecido
+            max_distance_ratio: distancia máxima admitida entre la posición
+                                predicha y la nueva, en múltiplos del tamaño
+                                del objeto
+            max_size_ratio:     cambio de tamaño máximo admitido entre ambos
+        """
+        self.max_gap_frames = max_gap_frames
+        self.max_distance_ratio = max_distance_ratio
+        self.max_size_ratio = max_size_ratio
+
+        # {tid: {"centro", "tam", "vel", "frame", "clase"}}
+        self._ultimo = {}
+        # {tid_nuevo: tid_original}, para seguir traduciendo en los siguientes
+        # fotogramas y no solo en el de la reaparición
+        self._remapeo = {}
+        self._conocidos = set()
+        self.recuperados = 0
+
+    @staticmethod
+    def _centro_y_tam(caja):
+        x1, y1, x2, y2 = float(caja[0]), float(caja[1]), float(caja[2]), float(caja[3])
+        return ((x1 + x2) / 2.0, (y1 + y2) / 2.0), max(1.0, (x2 - x1)), max(1.0, (y2 - y1))
+
+    def apply(self, tracker_ids, boxes, class_ids, frame_count):
+        """
+        Devuelve la lista de identificadores ya corregidos.
+
+        Args:
+            tracker_ids: identificadores que asignó el seguidor este fotograma
+            boxes:       cajas correspondientes
+            class_ids:   clases correspondientes
+            frame_count: número de fotograma actual
+        """
+        if tracker_ids is None or len(tracker_ids) == 0:
+            return tracker_ids
+
+        activos = {int(t) for t in tracker_ids}
+        salida = []
+
+        for tid, caja, cls in zip(tracker_ids, boxes, class_ids):
+            tid = int(tid)
+
+            # Ya se decidió antes que este identificador continúa otro
+            if tid in self._remapeo:
+                salida.append(self._remapeo[tid])
+                continue
+
+            if tid in self._conocidos:
+                salida.append(tid)
+                continue
+
+            # Identificador nuevo: buscar a qué track perdido puede continuar
+            candidato = self._buscar_continuacion(caja, cls, frame_count, activos)
+            if candidato is not None:
+                self._remapeo[tid] = candidato
+                self.recuperados += 1
+                salida.append(candidato)
+            else:
+                self._conocidos.add(tid)
+                salida.append(tid)
+
+        # Actualizar la última posición conocida de cada track ya traducido
+        for tid_final, caja, cls in zip(salida, boxes, class_ids):
+            self._registrar(int(tid_final), caja, int(cls), frame_count)
+
+        self._purgar(frame_count)
+        return salida
+
+    def _buscar_continuacion(self, caja, cls, frame_count, activos):
+        centro, ancho, alto = self._centro_y_tam(caja)
+        tam = ancho * alto
+        mejor, mejor_dist = None, float("inf")
+
+        for tid, info in self._ultimo.items():
+            # Un track que sigue vivo este fotograma no puede continuarse
+            if tid in activos:
+                continue
+            hueco = frame_count - info["frame"]
+            if hueco <= 0 or hueco > self.max_gap_frames:
+                continue
+            if info["clase"] != int(cls):
+                continue
+
+            # Tamaño parecido: un camión no continúa a una moto
+            razon = max(tam, info["tam"]) / max(1.0, min(tam, info["tam"]))
+            if razon > self.max_size_ratio:
+                continue
+
+            # Posición esperada según la velocidad que llevaba
+            px = info["centro"][0] + info["vel"][0] * hueco
+            py = info["centro"][1] + info["vel"][1] * hueco
+            dist = math.hypot(centro[0] - px, centro[1] - py)
+            if dist > max(ancho, alto) * self.max_distance_ratio:
+                continue
+
+            if dist < mejor_dist:
+                mejor, mejor_dist = tid, dist
+
+        return mejor
+
+    def _registrar(self, tid, caja, cls, frame_count):
+        centro, ancho, alto = self._centro_y_tam(caja)
+        previo = self._ultimo.get(tid)
+        vel = (0.0, 0.0)
+        if previo is not None:
+            dt = frame_count - previo["frame"]
+            if dt > 0:
+                vel = ((centro[0] - previo["centro"][0]) / dt,
+                       (centro[1] - previo["centro"][1]) / dt)
+        self._ultimo[tid] = {"centro": centro, "tam": ancho * alto,
+                             "vel": vel, "frame": frame_count, "clase": cls}
+        self._conocidos.add(tid)
+
+    def _purgar(self, frame_count):
+        for tid in [t for t, i in self._ultimo.items()
+                    if frame_count - i["frame"] > self.max_gap_frames]:
+            del self._ultimo[tid]
+            self._conocidos.discard(tid)
+            for nuevo, viejo in [(n, v) for n, v in self._remapeo.items() if v == tid]:
+                del self._remapeo[nuevo]
+
+
+# ---------------------------------------------------------------------------
 # Histéresis de confianza por track
 # ---------------------------------------------------------------------------
 class TrackConfidenceGate:
