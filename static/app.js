@@ -286,7 +286,9 @@ function clearCellElements(cell) {
     if (existingHeader) existingHeader.remove();
     const existingZoom = cell.querySelector('.zoom-indicator');
     if (existingZoom) existingZoom.remove();
-    cell.classList.remove('ptz-active', 'ptz-dragging');
+    const existingFit = cell.querySelector('.cam-fit-toggle');
+    if (existingFit) existingFit.remove();
+    cell.classList.remove('ptz-active', 'ptz-dragging', 'fit-cover');
 }
 
 // Delegated dragleave (works for dynamically created cells)
@@ -351,11 +353,77 @@ function _placeCellStream(cell, baseSrc, camData = null) {
     // Inject Camera Header Overlay
     if (camData) {
         renderCellHeader(cell, camData);
+        renderFitToggle(cell, camData);
         const isPtz = camData.is_ptz === true || camData.is_ptz === 'true' || camData.is_ptz == 1;
         if (isPtz) {
             attachPTZListeners(cell, camData);
         }
     }
+}
+
+// ---- Encuadre del vídeo dentro del panel ----
+// La elección se guarda por cámara en el navegador: depende del tamaño y la
+// proporción de la pantalla que se esté usando, así que no tiene sentido
+// llevarla al servidor y compartirla entre equipos distintos.
+
+const FIT_CONTAIN = 'contain';   // Transmisión original, con franjas si sobra
+const FIT_COVER = 'cover';       // Rellena el panel recortando los bordes
+const FIT_STORAGE_KEY = 'camFitModes';
+
+function loadFitModes() {
+    try {
+        return JSON.parse(localStorage.getItem(FIT_STORAGE_KEY)) || {};
+    } catch (e) {
+        return {};   // Almacenamiento corrupto o deshabilitado
+    }
+}
+
+function getFitMode(camId) {
+    return loadFitModes()[camId] === FIT_COVER ? FIT_COVER : FIT_CONTAIN;
+}
+
+function setFitMode(camId, modo) {
+    try {
+        const modos = loadFitModes();
+        modos[camId] = modo;
+        localStorage.setItem(FIT_STORAGE_KEY, JSON.stringify(modos));
+    } catch (e) {
+        // Navegación privada o almacenamiento lleno: el cambio se aplica
+        // igualmente en esta sesión, solo no se recuerda.
+    }
+}
+
+const ICONO_CONTAIN = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="3.5" width="13" height="9" rx="1"/><path d="M4.5 3.5v9M11.5 3.5v9"/></svg>';
+const ICONO_COVER = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="2.5" width="13" height="11" rx="1"/></svg>';
+
+function applyFitMode(cell, modo) {
+    cell.classList.toggle('fit-cover', modo === FIT_COVER);
+    const btn = cell.querySelector('.cam-fit-toggle');
+    if (!btn) return;
+
+    const esCover = modo === FIT_COVER;
+    btn.innerHTML = (esCover ? ICONO_COVER : ICONO_CONTAIN)
+        + `<span>${esCover ? 'Rellenar' : 'Original'}</span>`;
+    btn.title = esCover
+        ? 'Rellenando el panel: se recortan los bordes. Pulsa para ver la transmisión completa.'
+        : 'Transmisión original completa. Pulsa para rellenar el panel recortando los bordes.';
+    btn.setAttribute('aria-pressed', String(esCover));
+}
+
+function renderFitToggle(cell, cam) {
+    const btn = document.createElement('button');
+    btn.className = 'cam-fit-toggle';
+    btn.type = 'button';
+    // Sin esto, el clic llegaría a la celda y activaría el arrastre o el PTZ
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const nuevo = cell.classList.contains('fit-cover') ? FIT_CONTAIN : FIT_COVER;
+        setFitMode(cam.id, nuevo);
+        applyFitMode(cell, nuevo);
+    });
+    btn.addEventListener('dblclick', (e) => e.stopPropagation());
+    cell.appendChild(btn);
+    applyFitMode(cell, getFitMode(cam.id));
 }
 
 function renderCellHeader(cell, cam) {
@@ -378,6 +446,14 @@ function renderCellHeader(cell, cam) {
     `;
 
     cell.appendChild(header);
+
+    // Medir la cabecera y publicar su alto real, que es donde empieza la
+    // imagen. Un valor fijo en el CSS se desajustaría con otro tamaño de
+    // fuente o con el zoom del navegador, y volvería a tapar la transmisión.
+    const alto = Math.ceil(header.getBoundingClientRect().height);
+    if (alto > 0) {
+        cell.style.setProperty('--cam-header-h', `${alto}px`);
+    }
 }
 
 // --- PTZ Mouse Interaction Logic ---

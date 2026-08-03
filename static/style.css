@@ -369,16 +369,75 @@ body {
     background: var(--accent-soft);
 }
 
+/* Alto de la franja superior de cada panel. Se declara como variable porque la
+   imagen tiene que arrancar justo por debajo: antes ambas empezaban en top: 0 y
+   la cabecera tapaba la parte alta de la transmisión. */
+.video-cell {
+    --cam-header-h: 33px;
+}
+
 .video-cell img {
     width: 100%;
-    height: 100%;
+    /* La imagen ocupa el panel menos la cabecera, en lugar de pasar por debajo */
+    height: calc(100% - var(--cam-header-h));
     object-fit: contain;
     position: absolute;
-    top: 0;
+    top: var(--cam-header-h);
     left: 0;
     cursor: pointer;
     user-select: none;
     -webkit-user-drag: none;
+}
+
+/* Modo "rellenar": la imagen cubre todo el panel recortando lo que sobra por
+   los lados. Útil cuando la proporción del panel no coincide con la de la
+   cámara y las franjas negras molestan. */
+.video-cell.fit-cover img {
+    object-fit: cover;
+}
+
+/* Selector de encuadre, abajo a la derecha del panel */
+.cam-fit-toggle {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 9px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #e2e8f0;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border: 1px solid var(--surface-3);
+    border-radius: 6px;
+    cursor: pointer;
+    /* Discreto mientras no se necesita, para no estorbar la vigilancia */
+    opacity: 0.35;
+    transition: opacity 0.2s, background 0.2s;
+}
+
+.video-cell:hover .cam-fit-toggle {
+    opacity: 1;
+}
+
+.cam-fit-toggle:hover {
+    background: rgba(0,0,0,0.8);
+}
+
+.cam-fit-toggle:focus-visible {
+    opacity: 1;
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
+}
+
+.cam-fit-toggle svg {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
 }
 
 .placeholder-text {
