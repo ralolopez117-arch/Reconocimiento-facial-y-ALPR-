@@ -156,10 +156,13 @@ def generate_frames(stream_source, model_path="yolov8n.pt", cam_id=None):
         # --- Ghost boxes: posiciones predichas (Kalman) de tracks ocluidos ---
         # Se renderizan con borde discontinuo naranja y relleno semitransparente.
         # Solo se muestran tracks perdidos recientemente (hasta GHOST_MAX_FRAMES).
+        # Se pasan las cajas ya dibujadas para que no se superponga un fantasma
+        # sobre un objeto que el seguidor ya está siguiendo con otro id.
         render_ghost_tracks(
             annotated_frame, tracker, frame_count,
             track_last_seen, track_last_class,
             get_label_fn=get_label_es,
+            active_boxes=detections.xyxy if len(detections) > 0 else None,
         )
 
         # Check if background processor is already executing ALPR/FR for this camera

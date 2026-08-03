@@ -384,6 +384,29 @@ def draw_ghost_box(img: np.ndarray, x1: int, y1: int, x2: int, y2: int,
         cv2.putText(img, label, (lx, ly), font, font_scale, color, thickness, cv2.LINE_AA)
 
 
+def _iou(caja_a, caja_b) -> float:
+    """Intersección sobre unión de dos cajas [x1, y1, x2, y2]."""
+    ax1, ay1, ax2, ay2 = caja_a
+    bx1, by1, bx2, by2 = caja_b
+
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    ancho, alto = max(0.0, ix2 - ix1), max(0.0, iy2 - iy1)
+    interseccion = ancho * alto
+    if interseccion <= 0:
+        return 0.0
+
+    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    union = area_a + area_b - interseccion
+    return interseccion / union if union > 0 else 0.0
+
+
+# Solapamiento a partir del cual se considera que un ghost box representa el
+# mismo objeto que una detección activa, y por tanto sobra.
+GHOST_MAX_OVERLAP = 0.30
+
+
 def render_ghost_tracks(
     img: np.ndarray,
     tracker,
@@ -392,6 +415,8 @@ def render_ghost_tracks(
     track_last_class: dict,
     get_label_fn,
     ghost_max_frames: int = GHOST_MAX_FRAMES,
+    active_boxes=None,
+    max_overlap: float = GHOST_MAX_OVERLAP,
 ) -> None:
     """
     Recorre tracker.lost_tracks y dibuja ghost boxes para los tracks que
@@ -405,10 +430,29 @@ def render_ghost_tracks(
         track_last_class:  dict {track_id → class_id votado más reciente}
         get_label_fn:      función get_label_es(class_id) → str
         ghost_max_frames:  máximo de frames perdidos para mostrar ghost
+        active_boxes:      cajas de las detecciones que sí se están dibujando
+                           este frame. Los ghosts que se solapen con alguna se
+                           omiten: representan el mismo objeto físico.
+        max_overlap:       IoU a partir del cual se considera duplicado
     """
     lost_tracks = getattr(tracker, 'lost_tracks', [])
     if not lost_tracks:
         return
+
+    cajas_activas = [] if active_boxes is None else [
+        (float(b[0]), float(b[1]), float(b[2]), float(b[3])) for b in active_boxes
+    ]
+
+    # Cuando el seguidor fragmenta un objeto, deja varios tracks perdidos casi
+    # encima. Se recorren del más reciente al más antiguo y se van acumulando
+    # los ya dibujados, de modo que ante un solapamiento sobrevive el fantasma
+    # con información más fresca.
+    def _visto_por_ultima_vez(t):
+        tid = get_track_id(t)
+        return track_last_seen.get(tid, -1) if tid is not None else -1
+
+    lost_tracks = sorted(lost_tracks, key=_visto_por_ultima_vez, reverse=True)
+    cajas_dibujadas = []
 
     for lost_track in lost_tracks:
         try:
@@ -424,6 +468,16 @@ def render_ghost_tracks(
 
             # Posición predicha por el filtro de Kalman del tracker
             tlbr = lost_track.tlbr          # [x1, y1, x2, y2]
+
+            # Si ya hay una detección activa sobre ese mismo sitio, este ghost
+            # es un track viejo que el seguidor sustituyó por otro con id
+            # distinto. Dibujarlo apilaría dos o tres recuadros sobre el mismo
+            # vehículo, cada uno con su número.
+            caja = (float(tlbr[0]), float(tlbr[1]), float(tlbr[2]), float(tlbr[3]))
+            if any(_iou(caja, otra) > max_overlap
+                   for otra in cajas_activas + cajas_dibujadas):
+                continue
+
             x1, y1, x2, y2 = int(tlbr[0]), int(tlbr[1]), int(tlbr[2]), int(tlbr[3])
 
             cls_id  = track_last_class.get(tid, -1)
@@ -437,6 +491,7 @@ def render_ghost_tracks(
             alpha = max(0.04, 0.15 * fade)
 
             draw_ghost_box(img, x1, y1, x2, y2, label=ghost_label, alpha=alpha)
+            cajas_dibujadas.append(caja)
 
         except Exception as e:
             # Un ghost box fallido no debe romper el stream, pero tampoco puede
