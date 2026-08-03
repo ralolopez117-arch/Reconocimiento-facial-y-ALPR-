@@ -6,6 +6,7 @@ import supervision as sv
 from model_cache import get_model
 from config_manager import get_display_settings
 from analysis_queue import analysis_queue
+from fr_engine import has_known_faces
 from frame_source import FrameGrabber
 from label_mapper import get_label_es
 from tracking_utils import (TrackClassVoter, TrackConfidenceGate,
@@ -237,8 +238,11 @@ def _bucle_de_video(grabber, model, tracker, class_voter, conf_gate,
                                     # reintentar sobre este mismo vehículo.
                                     alpr_scanned_ids[tracker_id] = current_time
 
-                        # FR Logic: class 0=person
-                        if class_id == 0:
+                        # FR Logic: class 0=person.
+                        # Sin rostros registrados no hay contra qué comparar,
+                        # así que se omite el análisis por completo y la cámara
+                        # sigue leyendo matrículas con normalidad.
+                        if class_id == 0 and has_known_faces():
                             last_scan_time = fr_scanned_ids.get(tracker_id, 0)
                             if current_time - last_scan_time > 3.0:
                                 x1, y1, x2, y2 = map(int, xyxy)

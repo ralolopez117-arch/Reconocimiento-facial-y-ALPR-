@@ -469,6 +469,9 @@ def register_face():
     
     import fr_engine
     success, msg, face_id = fr_engine.register_face(image_bytes, name)
+    # Si era el primero, el reconocimiento estaba omitiéndose por completo.
+    # Se invalida la caché para que se active ya y no al vencer su plazo.
+    fr_engine.invalidate_known_faces_cache()
     if success:
         import os
         os.makedirs("static/faces", exist_ok=True)
@@ -521,6 +524,8 @@ def rename_face(face_id):
 @admin_required
 def delete_face(face_id):
     database.delete_known_face(face_id)
+    import fr_engine
+    fr_engine.invalidate_known_faces_cache()
     import os
     try:
         os.remove(f"static/faces/{face_id}.jpg")
@@ -532,6 +537,8 @@ def delete_face(face_id):
 @admin_required
 def delete_all_faces():
     database.delete_all_known_faces()
+    import fr_engine
+    fr_engine.invalidate_known_faces_cache()
     import os
     import glob
     for f in glob.glob("static/faces/*.jpg"):

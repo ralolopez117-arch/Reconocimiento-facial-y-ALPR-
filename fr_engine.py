@@ -6,6 +6,8 @@ import json
 import database
 import io
 import math
+import threading
+import time
 
 print("Loading FR Engine (Facial Recognition)...")
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -14,6 +16,60 @@ mtcnn = MTCNN(keep_all=False, device=device)
 # InceptionResnetV1 is used to extract facial embeddings
 resnet = InceptionResnetV1(pretrained='vggface2').eval().to(device)
 print("FR Engine loaded.")
+
+# ---------------------------------------------------------------------------
+# ¿Hay rostros que buscar?
+#
+# El reconocimiento facial solo puede encontrar a alguien previamente
+# registrado. Sin ningún rostro en la base de datos, ejecutar MTCNN y la red de
+# embeddings sobre cada persona detectada es cálculo íntegramente desperdiciado:
+# el resultado se compara contra una lista vacía y siempre da cero coincidencias.
+#
+# La respuesta se cachea porque esto se consulta por cada persona en cada
+# fotograma, y consultar la base de datos a ese ritmo sería peor que el propio
+# análisis que se pretende evitar.
+# ---------------------------------------------------------------------------
+_CACHE_TTL = 10.0          # segundos antes de volver a preguntar a la BD
+_cache_hay_rostros = None
+_cache_momento = 0.0
+_cache_lock = threading.Lock()
+
+
+def has_known_faces() -> bool:
+    """True si hay al menos un rostro registrado contra el que comparar."""
+    global _cache_hay_rostros, _cache_momento
+
+    ahora = time.time()
+    with _cache_lock:
+        if _cache_hay_rostros is not None and ahora - _cache_momento < _CACHE_TTL:
+            return _cache_hay_rostros
+
+    # La consulta se hace fuera del cerrojo: si dos hilos coinciden, ambos
+    # preguntan una vez y el resultado es el mismo, que es preferible a
+    # serializar todos los hilos de análisis contra la base de datos.
+    try:
+        hay = len(database.get_all_known_faces()) > 0
+    except Exception as e:
+        print(f"[FR] No se pudo comprobar los rostros registrados: {e}")
+        hay = True          # Ante la duda, no desactivar el reconocimiento
+
+    with _cache_lock:
+        _cache_hay_rostros = hay
+        _cache_momento = ahora
+    return hay
+
+
+def invalidate_known_faces_cache():
+    """
+    Fuerza a releer la base de datos en la próxima comprobación.
+
+    Se llama al registrar o eliminar rostros, para que activar o desactivar el
+    reconocimiento sea inmediato y no dependa del vencimiento de la caché.
+    """
+    global _cache_hay_rostros
+    with _cache_lock:
+        _cache_hay_rostros = None
+
 
 def extract_embedding(image_array):
     """
@@ -86,11 +142,16 @@ def process_person_image(person_crop, camera_id, threshold=0.75):
     Extracts the face embedding and matches it against known faces.
     """
     try:
+        # Salvaguarda: aunque quien llama debería filtrar antes, si no hay
+        # rostros registrados no se ejecutan las redes neuronales para nada.
+        known_faces = database.get_all_known_faces()
+        if not known_faces:
+            return []
+
         embedding = extract_embedding(person_crop)
         if embedding is None:
             return []
-        
-        known_faces = database.get_all_known_faces()
+
         matches = []
         
         for face_record in known_faces:

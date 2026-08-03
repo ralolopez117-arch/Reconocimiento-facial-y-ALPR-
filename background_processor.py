@@ -5,8 +5,9 @@ import supervision as sv
 from model_cache import get_model
 
 from config_manager import load_config, get_detection_mode
+from frame_source import FrameGrabber
 from alpr_engine import process_plate_image
-from fr_engine import process_person_image
+from fr_engine import process_person_image, has_known_faces
 
 class CameraWorker(threading.Thread):
     def __init__(self, camera_info, model_path="yolov8n.pt"):
@@ -30,47 +31,23 @@ class CameraWorker(threading.Thread):
             print(f"[BackgroundProcessor] Failed to load YOLO/ByteTrack for camera {self.cam_id}: {e}")
             return
 
+        # FrameGrabber reintenta la conexión por su cuenta. Antes, una cámara
+        # que estuviera caída al arrancar hacía terminar el trabajador, y esa
+        # cámara quedaba sin vigilancia hasta reiniciar el programa aunque
+        # volviera a estar disponible un minuto después.
+        grabber = FrameGrabber(self.source).start()
         stream_source = self.source
-        if isinstance(stream_source, str) and stream_source.isdigit():
-            stream_source = int(stream_source)
-
-        cap = None
-        if isinstance(stream_source, str) and not stream_source.startswith(('rtsp://', 'http://', 'https://')):
-            test_streams = [
-                f"http://{stream_source}",
-                f"http://{stream_source}/video",
-                f"rtsp://{stream_source}",
-                f"rtsp://{stream_source}/video"
-            ]
-            for ts in test_streams:
-                cap = cv2.VideoCapture(ts)
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                if cap.isOpened():
-                    stream_source = ts
-                    break
-                cap.release()
-                cap = None
-        else:
-            cap = cv2.VideoCapture(stream_source)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-
-        if cap is None or not cap.isOpened():
-            print(f"[BackgroundProcessor] Could not open camera stream: {self.source}")
-            return
 
         alpr_scanned_ids = {}
         fr_scanned_ids = {}
         frame_count = 0
 
-        while not self._stop_event.is_set():
-            ret, frame = cap.read()
-            if not ret:
-                time.sleep(0.5)
-                if self._stop_event.is_set():
-                    break
-                cap.release()
-                cap = cv2.VideoCapture(stream_source)
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        try:
+          while not self._stop_event.is_set():
+            frame = grabber.read(timeout=5.0)
+            if frame is None:
+                # Sin fotograma: la cámara puede estar caída. Se sigue
+                # intentando en lugar de abandonar.
                 continue
 
             frame_count += 1
@@ -106,8 +83,11 @@ class CameraWorker(threading.Thread):
                                     else:
                                         alpr_scanned_ids[tracker_id] = current_time
 
-                        # FR Logic: class 0=person
-                        if class_id == 0:
+                        # FR Logic: class 0=person.
+                        # Igual que en el generador de vídeo: sin rostros
+                        # registrados el reconocimiento no puede encontrar
+                        # nada, así que se salta y solo se leen matrículas.
+                        if class_id == 0 and has_known_faces():
                             last_scan_time = fr_scanned_ids.get(tracker_id, 0)
                             if current_time - last_scan_time > 3.0:
                                 x1, y1, x2, y2 = map(int, xyxy)
@@ -141,9 +121,9 @@ class CameraWorker(threading.Thread):
 
             # Sleep slightly to avoid maxing out CPU loop
             time.sleep(0.01)
-
-        cap.release()
-        print(f"[BackgroundProcessor] Worker stopped for camera: {self.cam_id}")
+        finally:
+            grabber.stop()
+            print(f"[BackgroundProcessor] Worker stopped for camera: {self.cam_id}")
 
 
 class BackgroundProcessorManager:
