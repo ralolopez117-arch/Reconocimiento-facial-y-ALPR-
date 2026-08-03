@@ -1,8 +1,17 @@
 # Detección y seguimiento
 ultralytics
-supervision
 opencv-python
 numpy
+
+# supervision se fija por debajo de 0.30: sv.ByteTrack está obsoleto desde
+# 0.28.0 y se elimina en 0.30.0. Sin este tope, un "pip install -U" rompería
+# el seguimiento por completo.
+#
+# El sustituto es ByteTrackTracker del paquete "trackers", con API distinta:
+# update_with_detections() pasa a update(), lost_tracks se sustituye por tracks
+# con time_since_update, y minimum_matching_threshold (distancia, 1-IoU) pasa a
+# minimum_iou_threshold (IoU directo), por lo que el 0.70 actual equivale a 0.30.
+supervision>=0.26,<0.30
 
 # Servidor web (modo escritorio y modo remoto)
 Flask
