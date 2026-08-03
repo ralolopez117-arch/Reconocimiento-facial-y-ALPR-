@@ -116,7 +116,11 @@ CLASES_VEHICULOS = {
     3,   # Motocicleta
     4,   # Avión
     5,   # Autobús
-    6,   # Tren
+    # Tren: nunca se muestra como tal —disambiguate_class lo convierte siempre
+    # en camión— pero debe seguir aquí. Si se retira, la caja desaparece en vez
+    # de reetiquetarse, porque ultralytics elige la clase por máximo sobre las
+    # 80 y filtra después.
+    6,   # Tren -> se mostrará como Camión
     7,   # Camión
     8,   # Barco
 }
@@ -172,7 +176,9 @@ def is_allowed_class(class_id: int) -> bool:
 CLASS_CONFIDENCE_THRESHOLDS = {
     # Clases de vehículos raros/improbables en videovigilancia terrestre
     4:  0.80,   # Avión — necesita alta confianza (podría confundirse con drones/pájaros)
-    6:  0.85,   # Tren — alta confianza para evitar tracto-camiones mal clasificados
+    # Tren ya no figura: nunca llega a evaluarse, porque la desambiguación lo
+    # convierte en camión antes del filtro de confianza. Mantener aquí el 0.85
+    # solo confundiría.
     8:  0.80,   # Barco — alta confianza para evitar tanques de agua/tubos
 
     # Fauna salvaje — muy poco probable en cámaras de tráfico urbano

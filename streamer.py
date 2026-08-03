@@ -19,17 +19,35 @@ def generate_frames(stream_source, model_path="yolov8n.pt", cam_id=None):
     # así que la cuadrícula de 8 cámaras mantenía 8 copias del mismo modelo.
     model = get_model(model_path)
 
-    # --- Tuned ByteTrack parameters ---
-    # lost_track_buffer: frames a mantener un track perdido antes de eliminarlo.
-    #   Aumentar a 60 evita que los recuadros desaparezcan en movimiento rápido.
-    # track_activation_threshold: confianza mínima para ACTIVAR un nuevo track.
-    #   Bajarlo a 0.20 ayuda a que tracks existentes sobrevivan frames difíciles.
-    # minimum_matching_threshold: IoU mínimo para asociar una detección con un track.
-    #   Bajar a 0.7 es más tolerante con deformaciones por perspectiva/movimiento.
+    # --- Parámetros de ByteTrack ---
+    #
+    # lost_track_buffer: fotogramas que se conserva un track perdido antes de
+    #   descartarlo. 60 evita que los recuadros desaparezcan en movimientos
+    #   rápidos u oclusiones breves.
+    #
+    # track_activation_threshold: confianza mínima para ACTIVAR un track nuevo.
+    #
+    # minimum_matching_threshold: OJO, no es un IoU mínimo pese a lo que
+    #   sugiere el nombre. supervision construye la matriz de coste como
+    #   1 - IoU y compara contra este valor, así que 0.85 significa exigir
+    #   IoU >= 0.15. Cuanto mayor el número, más permisiva la asociación.
+    #
+    #   Medido sobre 90 fotogramas de una cámara real: el 25% de los objetos
+    #   tiene un solapamiento inferior a 0.30 entre fotogramas consecutivos, de
+    #   modo que con el 0.70 anterior una de cada cuatro veces el seguidor no
+    #   lograba asociar el vehículo y le asignaba un identificador nuevo. Es la
+    #   causa de que un auto pase de #99 a #111 al avanzar por la imagen.
+    #
+    #   Pasar a 0.85 reduce a la mitad los identificadores creados sobre el
+    #   mismo metraje, sin aumentar las asociaciones erróneas: los saltos
+    #   bruscos de posición se mantienen en 3 de unas 500 detecciones.
+    #
+    # frame_rate: se comprobó que ajustarlo al valor real no cambia nada
+    #   apreciable (+2% de identificadores), así que se deja como estaba.
     tracker = sv.ByteTrack(
         track_activation_threshold=0.20,
         lost_track_buffer=60,
-        minimum_matching_threshold=0.70,
+        minimum_matching_threshold=0.85,
         frame_rate=25,
     )
 

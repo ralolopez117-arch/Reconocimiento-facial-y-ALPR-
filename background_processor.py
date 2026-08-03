@@ -27,7 +27,15 @@ class CameraWorker(threading.Thread):
         
         try:
             model = get_model(self.model_path)
-            tracker = sv.ByteTrack()
+            # Mismos parámetros que el generador de vídeo: usaba los de fábrica
+            # y fragmentaba los tracks igual que aquél antes de ajustarlos, con
+            # lo que reescaneaba el mismo vehículo bajo identificadores nuevos.
+            tracker = sv.ByteTrack(
+                track_activation_threshold=0.20,
+                lost_track_buffer=60,
+                minimum_matching_threshold=0.85,
+                frame_rate=25,
+            )
         except Exception as e:
             print(f"[BackgroundProcessor] Failed to load YOLO/ByteTrack for camera {self.cam_id}: {e}")
             return

@@ -242,14 +242,18 @@ def disambiguate_class(class_id: int, xyxy: np.ndarray, frame_shape: tuple) -> i
     #   Un tren real tapa la mayor parte del encuadre horizontalmente.
     # ------------------------------------------------------------------
     if class_id == CLS_TRAIN:
-        # El 0.35 original era demasiado exigente. Medido sobre una cámara de
-        # carretera real, un tractocamión con remolque cruzando el encuadre
-        # ocupa el 51% del ancho y se quedaba clasificado como tren, con lo que
-        # se le exigía el 0.85 de confianza reservado a los trenes y
-        # desaparecía. Un tren de verdad, visto desde una cámara de tráfico,
-        # atraviesa prácticamente todo el encuadre.
-        if rel_w < 0.80:
-            return CLS_TRUCK
+        # Un tren detectado por una cámara de carretera es siempre un
+        # tractocamión mal clasificado: el remolque largo y liso se parece a un
+        # vagón. Se convierte sin condición de tamaño.
+        #
+        # La clase "tren" NO se retira de la lista de inferencia aunque nunca
+        # llegue a mostrarse. Comprobado que hacerlo pierde la detección
+        # entera: ultralytics asigna la clase por máximo sobre las 80 y filtra
+        # después, así que una caja cuya mejor clase es "tren" desaparece en
+        # lugar de reetiquetarse. Manteniéndola, la caja sobrevive y aquí se
+        # corrige. En 70 fotogramas de una cámara real eran 37 detecciones que
+        # se habrían perdido.
+        return CLS_TRUCK
 
     # ------------------------------------------------------------------
     # Regla 4 — Boat que no está en zona inferior del frame → descartar
