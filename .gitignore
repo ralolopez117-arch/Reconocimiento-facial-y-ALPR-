@@ -23,3 +23,10 @@ env/
 
 # Modelos descargados bajo demanda por ultralytics (no son fuente del proyecto)
 yolov8n-seg.pt
+
+# Grabaciones del NVR y su indice. Son gigabytes de video y datos locales.
+recordings/
+
+# Configuracion del NVR: incluye la clave de acceso compartida y las rutas
+# de almacenamiento propias de cada instalacion.
+nvr_config.json

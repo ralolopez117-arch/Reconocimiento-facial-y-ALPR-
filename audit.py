@@ -17,6 +17,7 @@ purgarlo, se hace sobre la base de datos de forma consciente.
 
 import datetime
 import json
+import re
 
 from database import get_connection
 
@@ -147,6 +148,50 @@ def log(action: str, target: str = "", details=None,
         print(f"[Audit] No se pudo registrar la acción {action}: {e}")
 
 
+def _patrones_de_fecha(termino: str):
+    """
+    Traduce una fecha escrita como dd/mm/aaaa al formato en que se almacena.
+
+    En la tabla la marca de tiempo es aaaa-mm-dd, porque así ordena bien al
+    compararla como texto, pero en pantalla se muestra dd/mm/aaaa. Sin esta
+    traducción, buscar la fecha que se está viendo no encontraría nada.
+
+    Se aceptan también fechas parciales:
+        03/08/2026  -> ese día concreto
+        03/08       -> ese día y mes de cualquier año
+        08/2026     -> ese mes completo
+
+    Returns:
+        Lista de fragmentos a buscar dentro de la marca de tiempo.
+    """
+    t = termino.strip()
+    patrones = []
+
+    # dd/mm/aaaa
+    m = re.match(r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$", t)
+    if m:
+        dia, mes, anio = m.groups()
+        patrones.append(f"{anio}-{int(mes):02d}-{int(dia):02d}")
+        return patrones
+
+    # mm/aaaa — se comprueba antes que dd/mm porque el año de cuatro cifras
+    # lo hace inequívoco
+    m = re.match(r"^(\d{1,2})[/\-.](\d{4})$", t)
+    if m:
+        mes, anio = m.groups()
+        patrones.append(f"{anio}-{int(mes):02d}-")
+        return patrones
+
+    # dd/mm de cualquier año
+    m = re.match(r"^(\d{1,2})[/\-.](\d{1,2})$", t)
+    if m:
+        dia, mes = m.groups()
+        patrones.append(f"-{int(mes):02d}-{int(dia):02d}")
+        return patrones
+
+    return patrones
+
+
 def get_entries(limit: int = 100, action: str = None, username: str = None,
                 search: str = None):
     """
@@ -177,14 +222,21 @@ def get_entries(limit: int = 100, action: str = None, username: str = None,
                                  if termino in etiqueta.lower()]
 
         patron = f"%{search}%"
+        # timestamp entra en la búsqueda directa para que funcionen tanto el
+        # formato almacenado (2026-08-03) como una hora suelta (16:54)
         condiciones = ["target LIKE ?", "details LIKE ?", "action LIKE ?",
-                       "username LIKE ?"]
-        parametros += [patron, patron, patron, patron]
+                       "username LIKE ?", "timestamp LIKE ?"]
+        parametros += [patron] * 5
 
         if acciones_coincidentes:
             marcadores = ",".join("?" * len(acciones_coincidentes))
             condiciones.append(f"action IN ({marcadores})")
             parametros += acciones_coincidentes
+
+        # Fechas escritas como se muestran en pantalla
+        for fragmento in _patrones_de_fecha(search):
+            condiciones.append("timestamp LIKE ?")
+            parametros.append(f"%{fragmento}%")
 
         consulta += " AND (" + " OR ".join(condiciones) + ")"
 
