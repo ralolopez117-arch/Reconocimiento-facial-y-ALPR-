@@ -159,6 +159,37 @@ def recording_at(camera_id: str, momento: str):
                     params={"camera_id": camera_id, "at": momento})
 
 
+def create_export(camera_id: str, desde: str, hasta: str, nombre: str = ""):
+    """Encola la exportación de un intervalo a MP4."""
+    return _request("POST", "/api/export", json={
+        "camera_id": camera_id, "from": desde, "to": hasta, "name": nombre})
+
+
+def export_status(job_id: str):
+    return _request("GET", f"/api/export/{job_id}")
+
+
+def export_download(job_id: str):
+    """
+    Abre la descarga del archivo exportado para reenviarla al navegador.
+
+    Se devuelve sin consumir: una exportación puede pesar cientos de megabytes
+    y cargarla en memoria para reenviarla agotaría el servidor.
+    """
+    url = _base_url()
+    if not url:
+        raise NvrError("No hay dirección configurada")
+    try:
+        r = requests.get(f"{url}/api/export/{job_id}/download",
+                         headers=_headers(), stream=True,
+                         timeout=(TIMEOUT_CONEXION, 120))
+    except requests.exceptions.RequestException:
+        raise NvrError("No se pudo descargar la exportación")
+    if r.status_code >= 400:
+        raise NvrError(f"El servidor devolvió {r.status_code}", r.status_code)
+    return r
+
+
 def run_maintenance():
     return _request("POST", "/api/maintenance")
 

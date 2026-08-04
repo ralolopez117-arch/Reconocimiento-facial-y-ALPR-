@@ -1136,6 +1136,69 @@ body.is-admin .admin-only {
     color: var(--text-muted);
 }
 
+.pb-sep {
+    width: 1px;
+    height: 18px;
+    background: var(--border-color);
+    margin: 0 4px;
+}
+
+/* Modo de marcado activo: se resalta porque cambia lo que hace arrastrar
+   sobre la línea, y sin señal visible resulta desconcertante. */
+#pb-select-mode.activo {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+}
+
+.pb-selection-info {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: var(--primary);
+    white-space: nowrap;
+}
+
+.pb-export-btn:not(:disabled) {
+    background: #22c55e;
+    border-color: #22c55e;
+    color: #fff;
+}
+
+.pb-export-btn:not(:disabled):hover {
+    background: #16a34a;
+    border-color: #16a34a;
+}
+
+/* Tramo marcado sobre la línea de tiempo */
+.pb-selection {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: rgba(34, 197, 94, 0.22);
+    border-left: 2px solid #22c55e;
+    border-right: 2px solid #22c55e;
+    pointer-events: none;
+    display: none;
+}
+
+.pb-selection.visible { display: block; }
+
+/* Barra de progreso de la exportación */
+.export-bar {
+    height: 8px;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.export-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--primary), #22c55e);
+    transition: width 0.3s;
+}
+
 /* ---- Miniatura del día completo ----
    Al ampliar, la línea principal deja de mostrar las 24 h y se pierde la
    referencia de dónde se está mirando. Esta franja conserva siempre el día

@@ -342,6 +342,57 @@ def nvr_segment(segment_id):
                     mimetype=remota.headers.get('Content-Type', 'video/mp4'),
                     headers=cabeceras, direct_passthrough=True)
 
+@app.route('/api/nvr/export', methods=['POST'])
+@login_required
+def nvr_export_create():
+    """Encola una exportación de vídeo y devuelve el trabajo."""
+    datos = request.json or {}
+    try:
+        r = nvr_client.create_export(
+            datos.get('camera_id', ''), datos.get('from', ''),
+            datos.get('to', ''), datos.get('name', ''))
+    except nvr_client.NvrError as e:
+        return jsonify({'status': 'error', 'message': e.mensaje}), 502
+
+    job = r.get('job', {})
+    audit.log(audit.VIDEO_EXPORTED, target=job.get('filename', ''),
+              details={'desde': datos.get('from'), 'hasta': datos.get('to')})
+    return jsonify(r)
+
+@app.route('/api/nvr/export/<job_id>', methods=['GET'])
+@login_required
+def nvr_export_status(job_id):
+    try:
+        return jsonify(nvr_client.export_status(job_id))
+    except nvr_client.NvrError as e:
+        return jsonify({'status': 'error', 'message': e.mensaje}), 502
+
+@app.route('/api/nvr/export/<job_id>/download', methods=['GET'])
+@login_required
+def nvr_export_download(job_id):
+    """Reenvía el archivo exportado al navegador, por trozos."""
+    try:
+        remota = nvr_client.export_download(job_id)
+    except nvr_client.NvrError as e:
+        return jsonify({'status': 'error', 'message': e.mensaje}), 502
+
+    def retransmitir():
+        try:
+            for trozo in remota.iter_content(chunk_size=512 * 1024):
+                if trozo:
+                    yield trozo
+        finally:
+            remota.close()
+
+    cabeceras = {}
+    for h in ('Content-Length', 'Content-Disposition'):
+        if h in remota.headers:
+            cabeceras[h] = remota.headers[h]
+
+    return Response(retransmitir(), status=remota.status_code,
+                    mimetype='video/mp4', headers=cabeceras,
+                    direct_passthrough=True)
+
 @app.route('/api/detections/summary', methods=['GET'])
 @login_required
 def get_detections_summary():

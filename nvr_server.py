@@ -28,7 +28,7 @@ import mimetypes
 
 from flask import Flask, jsonify, request, Response, send_file
 
-from nvr import ffmpeg_tools, storage
+from nvr import export, ffmpeg_tools, storage
 from nvr.config import load_config, save_config, get_storage_path
 from nvr.recorder import recorder_manager
 
@@ -372,6 +372,56 @@ def serve_segment(segment_id):
     respuesta.headers["Accept-Ranges"] = "bytes"
     respuesta.headers["Content-Length"] = str(longitud)
     return respuesta
+
+
+# ---------------------------------------------------------------------------
+# Exportación
+# ---------------------------------------------------------------------------
+@app.route("/api/export", methods=["POST"])
+@token_required
+def crear_exportacion():
+    """
+    Encola la exportación de un intervalo a un único MP4.
+
+    Se responde enseguida con el identificador del trabajo en lugar de esperar
+    a que termine: una exportación larga agotaría el tiempo de espera del
+    navegador antes de generar el archivo.
+    """
+    datos = request.json or {}
+    job, error = export.crear_trabajo(
+        str(datos.get("camera_id", "")),
+        str(datos.get("from", "")),
+        str(datos.get("to", "")),
+        str(datos.get("name", "")))
+
+    if error:
+        return jsonify({"status": "error", "message": error}), 400
+    return jsonify({"status": "ok", "job": job.to_dict()})
+
+
+@app.route("/api/export/<job_id>", methods=["GET"])
+@token_required
+def estado_exportacion(job_id):
+    job = export.obtener_trabajo(job_id)
+    if not job:
+        return jsonify({"status": "error",
+                        "message": "La exportación caducó o no existe"}), 404
+    return jsonify({"status": "ok", "job": job.to_dict()})
+
+
+@app.route("/api/export/<job_id>/download", methods=["GET"])
+@token_required
+def descargar_exportacion(job_id):
+    job = export.obtener_trabajo(job_id)
+    if not job:
+        return jsonify({"status": "error",
+                        "message": "La exportación caducó o no existe"}), 404
+    if job.estado != "listo" or not job.ruta or not os.path.isfile(job.ruta):
+        return jsonify({"status": "error",
+                        "message": "La exportación aún no está lista"}), 409
+
+    return send_file(job.ruta, mimetype="video/mp4", as_attachment=True,
+                     download_name=job.nombre_sugerido(), conditional=True)
 
 
 @app.route("/api/maintenance", methods=["POST"])

@@ -54,6 +54,7 @@ DETECTIONS_FACES_CLEARED = "detections.faces_cleared"
 DETECTIONS_ALERTS_CLEARED = "detections.alerts_cleared"
 
 NVR_SETTINGS = "nvr.settings"
+VIDEO_EXPORTED = "nvr.exported"
 NVR_CAMERAS = "nvr.cameras"
 
 SESSION_LOGIN = "session.login"
@@ -84,6 +85,7 @@ ACTION_LABELS = {
     DETECTIONS_FACES_CLEARED: "Detecciones de rostros borradas",
     DETECTIONS_ALERTS_CLEARED: "Alertas de placas borradas",
     NVR_SETTINGS: "Servidor de grabaciones",
+    VIDEO_EXPORTED: "Vídeo exportado",
     NVR_CAMERAS: "Cámaras en grabación",
     SESSION_LOGIN: "Inicio de sesión",
     SESSION_LOGIN_FAILED: "Intento de acceso fallido",

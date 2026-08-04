@@ -2385,6 +2385,9 @@ function pbDibujarLineaDeTiempo() {
     pbDibujarMarcasHorarias(v);
     pbDibujarMiniatura(v);
     pbActualizarCabezal();
+    // La selección se dibuja en coordenadas de la ventana, así que hay
+    // que rehacerla cada vez que la ventana cambia.
+    if (typeof pbDibujarSeleccion === 'function') pbDibujarSeleccion();
 }
 
 /**
@@ -2599,6 +2602,8 @@ async function pbIrAInstante(momento) {
     linea.addEventListener('mouseleave', () => { hover.style.display = 'none'; });
 
     linea.addEventListener('mousedown', e => {
+        // En modo de marcado, arrastrar define un tramo en vez de saltar
+        if (PB.seleccion && PB.seleccion.modo) return;
         PB.arrastrando = true;
         pbActualizarCabezalTemporal(e.clientX);
     });
@@ -2682,3 +2687,346 @@ function pbActualizarCabezalTemporal(clientX) {
     cabezal.classList.add('visible');
     cabezal.style.left = `${frac * 100}%`;
 }
+
+
+// ===========================================================================
+//  Exportación de vídeo
+// ===========================================================================
+
+// Tramo marcado sobre la línea de tiempo, en segundos desde medianoche.
+PB.seleccion = { activa: false, modo: false, desde: null, hasta: null, arrastrando: false };
+
+function pbSegundosATexto(s) {
+    const p = n => String(Math.floor(n)).padStart(2, '0');
+    return `${p(s / 3600)}:${p((s / 60) % 60)}:${p(s % 60)}`;
+}
+
+function pbDibujarSeleccion() {
+    const el = document.getElementById('pb-selection');
+    const info = document.getElementById('pb-selection-info');
+    const btn = document.getElementById('pb-export');
+
+    if (!PB.seleccion.activa || PB.seleccion.desde === null || PB.seleccion.hasta === null) {
+        el.classList.remove('visible');
+        info.textContent = '';
+        btn.disabled = true;
+        return;
+    }
+
+    const a = Math.min(PB.seleccion.desde, PB.seleccion.hasta);
+    const b = Math.max(PB.seleccion.desde, PB.seleccion.hasta);
+    const v = pbVentana();
+
+    // Recortar a la ventana visible: al ampliar, la selección puede quedar
+    // parcialmente fuera y dibujarla entera desbordaría la barra.
+    const va = Math.max(a, v.inicio), vb = Math.min(b, v.fin);
+    if (vb <= va) {
+        el.classList.remove('visible');
+    } else {
+        el.classList.add('visible');
+        el.style.left = `${((va - v.inicio) / v.span) * 100}%`;
+        el.style.width = `${((vb - va) / v.span) * 100}%`;
+    }
+
+    const dur = b - a;
+    info.textContent = `${pbSegundosATexto(a)} → ${pbSegundosATexto(b)} `
+                     + `(${dur >= 60 ? Math.round(dur / 60) + ' min' : Math.round(dur) + ' s'})`;
+    btn.disabled = !PB.camara || dur < 1;
+}
+
+function pbAlternarModoSeleccion() {
+    PB.seleccion.modo = !PB.seleccion.modo;
+    document.getElementById('pb-select-mode')
+        .classList.toggle('activo', PB.seleccion.modo);
+    document.getElementById('pb-timeline').style.cursor =
+        PB.seleccion.modo ? 'crosshair' : 'pointer';
+
+    if (!PB.seleccion.modo) {
+        PB.seleccion.activa = false;
+        PB.seleccion.desde = PB.seleccion.hasta = null;
+        pbDibujarSeleccion();
+    } else {
+        showToast('Arrastra sobre la línea de tiempo para marcar el tramo a exportar.');
+    }
+}
+
+// ---- Ventana de exportación ----------------------------------------------
+
+function pbAbrirExportacion() {
+    if (!PB.camara) { showToast('Primero elige una cámara.'); return; }
+
+    const a = Math.min(PB.seleccion.desde, PB.seleccion.hasta);
+    const b = Math.max(PB.seleccion.desde, PB.seleccion.hasta);
+
+    // Se rellenan también los campos manuales: la selección de la línea es
+    // aproximada al píxel y así se puede ajustar al segundo.
+    document.getElementById('export-date-from').value = PB.fecha || '';
+    document.getElementById('export-time-from').value = pbSegundosATexto(a);
+    document.getElementById('export-time-to').value = pbSegundosATexto(b);
+
+    const sel = document.getElementById('export-camera');
+    sel.innerHTML = '';
+    PB.camarasConGrabacion.filter(c => c.days_recorded > 0).forEach(c => {
+        const o = document.createElement('option');
+        o.value = c.camera_id;
+        o.textContent = c.name;
+        sel.appendChild(o);
+    });
+    sel.value = PB.camara.camera_id;
+
+    pbActualizarNombreSugerido();
+    pbActualizarResumenExportacion();
+
+    document.getElementById('export-progress-wrap').style.display = 'none';
+    document.getElementById('export-message').classList.remove('visible');
+    document.getElementById('export-start').disabled = false;
+
+    // Aviso honesto sobre dónde se puede guardar según el navegador
+    const nativo = typeof window.showSaveFilePicker === 'function';
+    document.getElementById('export-location-note').textContent = nativo
+        ? 'Al exportar se abrirá el diálogo de Windows para elegir la carpeta, '
+          + 'situado en Vídeos.'
+        : 'Este navegador no permite elegir carpeta: el archivo irá a tu carpeta '
+          + 'de descargas habitual.';
+
+    document.getElementById('export-overlay').classList.add('active');
+}
+
+function pbActualizarNombreSugerido() {
+    const sel = document.getElementById('export-camera');
+    const nombreCam = sel.options[sel.selectedIndex]?.textContent || 'grabacion';
+    const f = document.getElementById('export-date-from').value || '';
+    const d = (document.getElementById('export-time-from').value || '').replace(/:/g, '-');
+    const h = (document.getElementById('export-time-to').value || '').replace(/:/g, '-');
+
+    // Windows no admite \ / : * ? " < > | en los nombres de archivo
+    const base = nombreCam.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '_');
+    document.getElementById('export-filename').value = `${base}_${f}_${d}_a_${h}.mp4`;
+}
+
+function pbActualizarResumenExportacion() {
+    const f = document.getElementById('export-date-from').value;
+    const d = document.getElementById('export-time-from').value;
+    const h = document.getElementById('export-time-to').value;
+    const info = document.getElementById('export-range-info');
+
+    const sd = pbTextoASegundos(d), sh = pbTextoASegundos(h);
+    if (sd === null || sh === null || sh <= sd) {
+        info.innerHTML = '<span style="color:#f87171;">El intervalo no es válido: '
+                       + 'la hora final debe ser posterior a la inicial.</span>';
+        return;
+    }
+    const dur = sh - sd;
+    info.textContent = `Se exportará ${f} de ${d} a ${h}`
+                     + ` — ${dur >= 60 ? (dur / 60).toFixed(1) + ' minutos' : dur + ' segundos'}.`;
+}
+
+function pbTextoASegundos(t) {
+    if (!t) return null;
+    const m = String(t).match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (!m) return null;
+    return (+m[1]) * 3600 + (+m[2]) * 60 + (+(m[3] || 0));
+}
+
+// ---- Ejecución de la exportación -----------------------------------------
+
+async function pbEjecutarExportacion() {
+    const camId = document.getElementById('export-camera').value;
+    const fecha = document.getElementById('export-date-from').value;
+    const desde = document.getElementById('export-time-from').value;
+    const hasta = document.getElementById('export-time-to').value;
+    const nombreArchivo = document.getElementById('export-filename').value.trim()
+                          || 'grabacion.mp4';
+
+    const sd = pbTextoASegundos(desde), sh = pbTextoASegundos(hasta);
+    if (!fecha || sd === null || sh === null || sh <= sd) {
+        pbMensajeExportacion(false, 'Revisa la fecha y las horas.');
+        return;
+    }
+
+    const norm = t => (t.length === 5 ? t + ':00' : t);
+    const cuerpo = {
+        camera_id: camId,
+        from: `${fecha} ${norm(desde)}`,
+        to: `${fecha} ${norm(hasta)}`,
+        name: document.getElementById('export-camera')
+                      .options[document.getElementById('export-camera').selectedIndex]?.textContent || '',
+    };
+
+    document.getElementById('export-start').disabled = true;
+    document.getElementById('export-progress-wrap').style.display = 'block';
+    pbProgresoExportacion(0, 'Preparando…');
+    pbMensajeExportacion(true, '');
+
+    let job;
+    try {
+        const r = await fetch('/api/nvr/export', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(cuerpo)
+        });
+        const d = await r.json();
+        if (!r.ok || d.status === 'error') {
+            pbMensajeExportacion(false, d.message || 'No se pudo iniciar la exportación');
+            document.getElementById('export-start').disabled = false;
+            return;
+        }
+        job = d.job;
+    } catch (e) {
+        pbMensajeExportacion(false, 'No se pudo contactar con el servidor');
+        document.getElementById('export-start').disabled = false;
+        return;
+    }
+
+    // Se consulta el progreso en lugar de esperar a que termine la petición:
+    // una exportación larga agotaría el tiempo de espera del navegador.
+    const listo = await pbEsperarExportacion(job.id);
+    if (!listo) {
+        document.getElementById('export-start').disabled = false;
+        return;
+    }
+
+    pbProgresoExportacion(100, 'Guardando…');
+    await pbGuardarArchivo(job.id, nombreArchivo);
+    document.getElementById('export-start').disabled = false;
+}
+
+async function pbEsperarExportacion(jobId) {
+    const inicio = Date.now();
+    while (Date.now() - inicio < 15 * 60 * 1000) {
+        await new Promise(r => setTimeout(r, 800));
+        try {
+            const d = await (await fetch(`/api/nvr/export/${jobId}`)).json();
+            const job = d.job;
+            if (!job) { pbMensajeExportacion(false, d.message || 'Exportación perdida'); return false; }
+
+            if (job.status === 'error') {
+                pbMensajeExportacion(false, job.message || 'La exportación falló');
+                return false;
+            }
+            pbProgresoExportacion(job.progress,
+                job.status === 'procesando' ? 'Uniendo y recortando el vídeo…' : 'En cola…');
+            if (job.status === 'listo') return true;
+        } catch (e) {
+            pbMensajeExportacion(false, 'Se perdió la conexión durante la exportación');
+            return false;
+        }
+    }
+    pbMensajeExportacion(false, 'La exportación tardó demasiado');
+    return false;
+}
+
+/**
+ * Descarga el resultado y lo guarda donde elija el usuario.
+ *
+ * Con showSaveFilePicker se abre el diálogo nativo de Windows, que permite
+ * elegir carpeta y nombre; se parte de la carpeta Vídeos. Los navegadores que
+ * no lo soportan solo pueden descargar a la carpeta habitual, así que se
+ * recurre a la descarga normal conservando el nombre.
+ */
+async function pbGuardarArchivo(jobId, nombreArchivo) {
+    const url = `/api/nvr/export/${jobId}/download`;
+
+    if (typeof window.showSaveFilePicker === 'function') {
+        let destino;
+        try {
+            destino = await window.showSaveFilePicker({
+                suggestedName: nombreArchivo,
+                startIn: 'videos',
+                types: [{ description: 'Vídeo MP4', accept: { 'video/mp4': ['.mp4'] } }],
+            });
+        } catch (e) {
+            // El usuario cerró el diálogo: no es un error que haya que reportar
+            pbMensajeExportacion(true, 'Guardado cancelado. El archivo sigue disponible unos minutos.');
+            return;
+        }
+
+        try {
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error('descarga');
+            const escritor = await destino.createWritable();
+            await resp.body.pipeTo(escritor);
+            pbMensajeExportacion(true, `✔ Guardado como ${destino.name}`);
+            setTimeout(() => document.getElementById('export-overlay')
+                                     .classList.remove('active'), 1800);
+        } catch (e) {
+            pbMensajeExportacion(false, 'No se pudo escribir el archivo');
+        }
+        return;
+    }
+
+    // Descarga normal
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = nombreArchivo;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    pbMensajeExportacion(true, '✔ Descarga iniciada');
+}
+
+function pbProgresoExportacion(pct, texto) {
+    document.getElementById('export-bar-fill').style.width = `${pct}%`;
+    document.getElementById('export-progress-text').textContent =
+        `${texto} ${pct > 0 ? Math.round(pct) + '%' : ''}`;
+}
+
+function pbMensajeExportacion(ok, texto) {
+    const el = document.getElementById('export-message');
+    el.textContent = texto;
+    el.style.color = ok ? '#4ade80' : '#f87171';
+    el.classList.toggle('visible', !!texto);
+}
+
+// ---- Enlazado -------------------------------------------------------------
+
+(function pbInicializarExportacion() {
+    document.getElementById('pb-select-mode')
+        .addEventListener('click', pbAlternarModoSeleccion);
+    document.getElementById('pb-export')
+        .addEventListener('click', pbAbrirExportacion);
+
+    ['export-close', 'export-cancel'].forEach(id =>
+        document.getElementById(id).addEventListener('click',
+            () => document.getElementById('export-overlay').classList.remove('active')));
+
+    document.getElementById('export-start')
+        .addEventListener('click', pbEjecutarExportacion);
+
+    ['export-camera', 'export-date-from', 'export-time-from', 'export-time-to']
+        .forEach(id => document.getElementById(id).addEventListener('change', () => {
+            pbActualizarNombreSugerido();
+            pbActualizarResumenExportacion();
+        }));
+
+    // Marcado sobre la línea de tiempo. Se registra en fase de captura para
+    // poder detener el manejador de salto cuando el modo de marcar está activo.
+    const linea = document.getElementById('pb-timeline');
+
+    linea.addEventListener('mousedown', e => {
+        if (!PB.seleccion.modo) return;
+        e.stopPropagation();
+        const { segundos } = pbHoraEnPosicion(e.clientX);
+        PB.seleccion.arrastrando = true;
+        PB.seleccion.activa = true;
+        PB.seleccion.desde = segundos;
+        PB.seleccion.hasta = segundos;
+        pbDibujarSeleccion();
+    }, true);
+
+    linea.addEventListener('mousemove', e => {
+        if (!PB.seleccion.arrastrando) return;
+        PB.seleccion.hasta = pbHoraEnPosicion(e.clientX).segundos;
+        pbDibujarSeleccion();
+    }, true);
+
+    document.addEventListener('mouseup', () => {
+        if (!PB.seleccion.arrastrando) return;
+        PB.seleccion.arrastrando = false;
+        // Un clic suelto sin arrastrar no es una selección útil
+        if (Math.abs(PB.seleccion.hasta - PB.seleccion.desde) < 1) {
+            PB.seleccion.activa = false;
+            PB.seleccion.desde = PB.seleccion.hasta = null;
+        }
+        pbDibujarSeleccion();
+    }, true);
+})();

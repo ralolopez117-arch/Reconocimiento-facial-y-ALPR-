@@ -382,11 +382,22 @@
                     <button id="pb-zoom-in" class="pb-zoom-btn" title="Estirar: ampliar el detalle">+</button>
                     <button id="pb-zoom-fit" class="pb-zoom-btn pb-zoom-fit"
                             title="Ver el día completo">Día completo</button>
-                    <span class="pb-zoom-hint">También con la rueda del ratón sobre la línea</span>
+
+                    <span class="pb-sep"></span>
+
+                    <button id="pb-select-mode" class="pb-zoom-btn pb-zoom-fit"
+                            title="Marcar un tramo arrastrando sobre la línea de tiempo">
+                        ✂ Marcar recorte</button>
+                    <span id="pb-selection-info" class="pb-selection-info"></span>
+                    <button id="pb-export" class="pb-zoom-btn pb-zoom-fit pb-export-btn"
+                            title="Exportar el tramo marcado a MP4" disabled>Exportar</button>
+
+                    <span class="pb-zoom-hint">Rueda del ratón para ampliar</span>
                 </div>
                 <div class="pb-timeline" id="pb-timeline"
                      title="Arrastra para moverte. Rueda para ampliar o contraer.">
                     <div class="pb-timeline-track" id="pb-timeline-track"></div>
+                    <div class="pb-selection" id="pb-selection"></div>
                     <div class="pb-playhead" id="pb-playhead"></div>
                     <div class="pb-hover-time" id="pb-hover-time"></div>
                 </div>
@@ -399,6 +410,61 @@
                 </div>
             </div>
 
+        </div>
+    </div>
+
+    <!-- Ventana de exportación -->
+    <div class="modal-overlay" id="export-overlay">
+        <div class="modal" style="width:480px; max-width:92vw;">
+            <div class="alpr-header">
+                <h3>Exportar vídeo</h3>
+                <button id="export-close" class="btn-icon">×</button>
+            </div>
+
+            <p class="settings-hint" id="export-range-info"></p>
+
+            <label class="settings-field-label" for="export-camera">Cámara</label>
+            <select id="export-camera" class="settings-select"></select>
+
+            <div style="display:flex; gap:8px; margin-top:12px;">
+                <div style="flex:1;">
+                    <label class="settings-field-label" for="export-date-from">Fecha</label>
+                    <input type="date" id="export-date-from" class="playback-date"
+                           style="width:100%;">
+                </div>
+                <div style="width:120px;">
+                    <label class="settings-field-label" for="export-time-from">Desde</label>
+                    <input type="time" id="export-time-from" step="1" class="playback-date"
+                           style="width:100%;">
+                </div>
+                <div style="width:120px;">
+                    <label class="settings-field-label" for="export-time-to">Hasta</label>
+                    <input type="time" id="export-time-to" step="1" class="playback-date"
+                           style="width:100%;">
+                </div>
+            </div>
+
+            <label class="settings-field-label" for="export-filename" style="margin-top:14px;">
+                Nombre del archivo
+            </label>
+            <input type="text" id="export-filename"
+                   style="width:100%; box-sizing:border-box; padding:9px 12px;
+                          background:var(--bg-card); border:1px solid var(--border-color);
+                          border-radius:6px; color:var(--text-color); outline:none;">
+
+            <p class="settings-field-desc" id="export-location-note"></p>
+
+            <div id="export-progress-wrap" style="display:none; margin-top:14px;">
+                <div class="export-bar"><div class="export-bar-fill" id="export-bar-fill"></div></div>
+                <p class="settings-field-desc" id="export-progress-text"></p>
+            </div>
+
+            <div id="export-message" class="settings-msg"></div>
+
+            <div class="modal-actions" style="margin-top:14px;">
+                <button id="export-cancel" class="btn-secondary">Cancelar</button>
+                <button id="export-start" class="btn-primary">Exportar y guardar</button>
+            </div>
         </div>
     </div>
 

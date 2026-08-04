@@ -175,6 +175,17 @@ def build_record_command(source: str, patron_salida: str, segundos_segmento: int
         "-rw_timeout", "15000000",          # 15 s sin datos: se reintenta
     ]
 
+    if not copiar:
+        # Marca cada fotograma con la hora en que llega.
+        #
+        # Las cámaras MJPEG sobre HTTP no envían marcas de tiempo, así que sin
+        # esto ffmpeg asume que el flujo va a la velocidad nominal de salida.
+        # Con una cámara que entrega 5 fps reales y una salida etiquetada a 10,
+        # media hora de reloj quedaba guardada como quince minutos de vídeo:
+        # las grabaciones se reproducían al doble de velocidad y la línea de
+        # tiempo situaba los sucesos en momentos equivocados.
+        cmd += ["-use_wallclock_as_timestamps", "1"]
+
     if str(source).lower().startswith("rtsp://"):
         # TCP evita la pérdida de paquetes típica de RTSP sobre UDP, que se
         # traduce en artefactos y segmentos corruptos.
@@ -193,8 +204,18 @@ def build_record_command(source: str, patron_salida: str, segundos_segmento: int
             cmd += ["-preset", "p4", "-rc", "vbr", "-cq", str(calidad)]
         else:
             cmd += ["-q:v", str(calidad)]
+
         if fps_max:
-            cmd += ["-r", str(fps_max)]
+            # El filtro fps respeta las marcas de tiempo de entrada: si la
+            # cámara va más rápida descarta fotogramas, y si va más lenta los
+            # duplica, pero la duración del archivo sigue coincidiendo con el
+            # tiempo real transcurrido.
+            #
+            # Con "-r" pasaba lo contrario: imponía la cadencia sin mirar
+            # cuándo llegó cada fotograma, y comprimía el tiempo.
+            cmd += ["-vf", f"fps={fps_max}"]
+        else:
+            cmd += ["-fps_mode", "passthrough"]
         # Un fotograma clave cada 2 segundos: permite buscar en la línea de
         # tiempo con precisión sin inflar demasiado el archivo.
         cmd += ["-g", "50", "-force_key_frames", "expr:gte(t,n_forced*2)"]
