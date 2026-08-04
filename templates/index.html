@@ -320,6 +320,7 @@
                 <button class="fr-tab admin-only" data-tab="settings-tab-plates">🚗 Placas</button>
                 <button class="fr-tab active" data-tab="settings-tab-display">👁 Visualización</button>
                 <button class="fr-tab admin-only" data-tab="settings-tab-users">👥 Usuarios</button>
+                <button class="fr-tab admin-only" data-tab="settings-tab-nvr">🎥 Grabaciones</button>
                 <button class="fr-tab admin-only" data-tab="settings-tab-audit">Registro</button>
                 <button class="fr-tab admin-only" data-tab="settings-tab-session">🔒 Sesión</button>
             </div>
@@ -480,6 +481,83 @@
                         </tbody>
                     </table>
                 </div>
+            </div>
+
+            <!-- Tab: Servidor de grabaciones (solo administrador) -->
+            <div id="settings-tab-nvr" class="fr-tab-content">
+                <p class="settings-hint">
+                    El servidor de grabaciones puede estar en este mismo equipo o en otro
+                    de la red local. Al arrancarlo por primera vez muestra una
+                    <strong>clave de acceso</strong> que hay que copiar aquí.
+                </p>
+
+                <label class="settings-field-label" for="nvr-url">Dirección del servidor</label>
+                <input type="text" id="nvr-url" placeholder="http://192.168.0.24:8001"
+                       style="width:100%; box-sizing:border-box; padding:9px 12px;
+                              background:var(--bg-card); border:1px solid var(--border-color);
+                              border-radius:6px; color:var(--text-color); outline:none;">
+
+                <label class="settings-field-label" for="nvr-token" style="margin-top:14px;">
+                    Clave de acceso
+                    <span id="nvr-token-state" class="settings-field-value"></span>
+                </label>
+                <input type="password" id="nvr-token" placeholder="Pegar la clave del servidor"
+                       style="width:100%; box-sizing:border-box; padding:9px 12px;
+                              background:var(--bg-card); border:1px solid var(--border-color);
+                              border-radius:6px; color:var(--text-color); outline:none;">
+                <p class="settings-field-desc">
+                    Déjala vacía para conservar la que ya está guardada. Obtenla con
+                    <code>python nvr_server.py --token</code>.
+                </p>
+
+                <label class="toggle-row settings-toggle" style="margin-top:14px;">
+                    <span class="option-body">
+                        <strong>Usar el servidor de grabaciones</strong>
+                        <small>Al desactivarlo, la aplicación deja de consultarlo. El
+                               servidor sigue grabando por su cuenta.</small>
+                    </span>
+                    <input type="checkbox" id="nvr-enabled">
+                    <span class="toggle-slider"></span>
+                </label>
+
+                <div style="display:flex; gap:8px; margin-top:14px;">
+                    <button id="nvr-save" class="btn-primary" style="padding:9px 18px;">
+                        Guardar y probar conexión</button>
+                    <button id="nvr-refresh" class="btn-secondary" style="padding:9px 18px;">
+                        Actualizar estado</button>
+                </div>
+
+                <div id="nvr-status" class="settings-msg" style="opacity:1; min-height:22px;"></div>
+
+                <hr style="border:none; border-top:1px solid var(--border-color); margin:18px 0;">
+
+                <p class="settings-hint">
+                    <strong>Qué cámaras se graban y cuántos días se conservan.</strong>
+                    Al superar los días indicados no se borra todo: se elimina el día más
+                    antiguo, de modo que lo nuevo va sustituyendo a lo viejo.
+                </p>
+
+                <div class="alpr-table-container">
+                    <table class="alpr-table">
+                        <thead>
+                            <tr>
+                                <th style="width:70px;">Grabar</th>
+                                <th>Cámara</th>
+                                <th style="width:110px;">Días</th>
+                                <th>Almacenado</th>
+                            </tr>
+                        </thead>
+                        <tbody id="nvr-cameras-body">
+                            <!-- Filled by JS -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+                    <button id="nvr-save-cameras" class="btn-primary" style="padding:9px 18px;">
+                        Aplicar al servidor</button>
+                </div>
+                <div id="nvr-cameras-msg" class="settings-msg"></div>
             </div>
 
             <!-- Tab: Registro de auditoría (solo administrador) -->

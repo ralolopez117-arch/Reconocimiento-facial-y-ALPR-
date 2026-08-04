@@ -53,6 +53,9 @@ DETECTIONS_PLATES_CLEARED = "detections.plates_cleared"
 DETECTIONS_FACES_CLEARED = "detections.faces_cleared"
 DETECTIONS_ALERTS_CLEARED = "detections.alerts_cleared"
 
+NVR_SETTINGS = "nvr.settings"
+NVR_CAMERAS = "nvr.cameras"
+
 SESSION_LOGIN = "session.login"
 SESSION_LOGIN_FAILED = "session.login_failed"
 SESSION_LOGOUT = "session.logout"
@@ -80,6 +83,8 @@ ACTION_LABELS = {
     DETECTIONS_PLATES_CLEARED: "Detecciones de placas borradas",
     DETECTIONS_FACES_CLEARED: "Detecciones de rostros borradas",
     DETECTIONS_ALERTS_CLEARED: "Alertas de placas borradas",
+    NVR_SETTINGS: "Servidor de grabaciones",
+    NVR_CAMERAS: "Cámaras en grabación",
     SESSION_LOGIN: "Inicio de sesión",
     SESSION_LOGIN_FAILED: "Intento de acceso fallido",
     SESSION_LOGOUT: "Cierre de sesión",

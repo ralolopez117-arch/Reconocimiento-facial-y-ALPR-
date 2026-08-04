@@ -20,6 +20,7 @@ import camera_health
 from camera_health import health_monitor
 from analysis_queue import analysis_queue
 from ptz_control import get_ptz_controller
+import nvr_client
 
 app = Flask(__name__)
 app.secret_key = auth.get_secret_key()
@@ -154,6 +155,192 @@ def index():
     prefs = auth.get_preferences(session['user_id'])
     return render_template('index.html', user=user, is_admin=auth.is_admin(),
                            theme=prefs['theme'])
+
+# ---------------------------------------------------------------------------
+# Servidor de grabaciones (NVR)
+#
+# El navegador nunca habla directamente con el NVR: todo pasa por aquí, para
+# que la clave de acceso no salga del servidor y para reutilizar la sesión.
+# ---------------------------------------------------------------------------
+@app.route('/api/nvr/settings', methods=['GET'])
+@login_required
+def get_nvr_config():
+    ajustes = nvr_client.get_nvr_settings()
+    # La clave no se envía al navegador: solo si está puesta o no
+    return jsonify({
+        'enabled': ajustes['enabled'],
+        'url': ajustes['url'],
+        'has_token': bool(ajustes['token']),
+    })
+
+@app.route('/api/nvr/settings', methods=['PUT'])
+@admin_required
+def update_nvr_config():
+    datos = request.json or {}
+    actual = nvr_client.get_nvr_settings()
+
+    nuevos = {
+        'enabled': bool(datos.get('enabled', actual['enabled'])),
+        'url': (datos.get('url', actual['url']) or '').strip(),
+        # Una clave vacía significa "no la cambies", para que el usuario pueda
+        # editar la dirección sin volver a teclearla.
+        'token': (datos.get('token') or '').strip() or actual['token'],
+    }
+    nvr_client.save_nvr_settings(nuevos)
+    audit.log(audit.NVR_SETTINGS, target=nuevos['url'],
+              details={'activo': nuevos['enabled']})
+    return jsonify({'status': 'success'})
+
+@app.route('/api/nvr/status', methods=['GET'])
+@login_required
+def get_nvr_status():
+    """Estado del servidor de grabaciones, o el motivo de que no responda."""
+    try:
+        salud = nvr_client.health()
+    except nvr_client.NvrError as e:
+        return jsonify({'connected': False, 'message': e.mensaje})
+
+    try:
+        estado = nvr_client.status()
+    except nvr_client.NvrError as e:
+        # Responde pero rechaza la clave: es un problema distinto de "apagado"
+        return jsonify({'connected': True, 'authenticated': False,
+                        'message': e.mensaje, 'health': salud})
+
+    return jsonify({'connected': True, 'authenticated': True,
+                    'health': salud, **estado})
+
+@app.route('/api/nvr/cameras', methods=['GET'])
+@login_required
+def get_nvr_cameras():
+    """
+    Cámaras de la aplicación cruzadas con lo que el NVR está grabando.
+
+    Se combinan aquí para que la interfaz muestre todas las cámaras
+    registradas, graben o no, con su estado de grabación al lado.
+    """
+    camaras = load_config().get('cameras', [])
+    try:
+        grabando = {c['camera_id']: c for c in nvr_client.get_cameras()['cameras']}
+        disponible = True
+        mensaje = ''
+    except nvr_client.NvrError as e:
+        grabando, disponible, mensaje = {}, False, e.mensaje
+
+    resultado = []
+    for cam in camaras:
+        info = grabando.get(cam['id'], {})
+        resultado.append({
+            'camera_id': cam['id'],
+            'name': cam['name'],
+            'recording': bool(info.get('enabled')),
+            'retention_days': int(info.get('retention_days', 3)),
+            'days_recorded': info.get('days_recorded', 0),
+            'oldest_day': info.get('oldest_day'),
+            'newest_day': info.get('newest_day'),
+            'bytes': info.get('bytes', 0),
+        })
+
+    return jsonify({'cameras': resultado, 'nvr_available': disponible,
+                    'message': mensaje})
+
+@app.route('/api/nvr/cameras', methods=['PUT'])
+@admin_required
+def update_nvr_cameras():
+    """Define qué cámaras se graban y durante cuántos días."""
+    datos = request.json or {}
+    seleccion = {str(c.get('camera_id')): c for c in datos.get('cameras', [])}
+
+    # La fuente se toma de la configuración de la aplicación, no de lo que
+    # llegue del navegador: el NVR debe grabar la cámara real, no una URL
+    # arbitraria que alguien pudiera inyectar.
+    payload = []
+    for cam in load_config().get('cameras', []):
+        elegida = seleccion.get(cam['id'])
+        if elegida is None:
+            continue
+        try:
+            dias = int(elegida.get('retention_days', 3))
+        except (TypeError, ValueError):
+            return jsonify({'status': 'error',
+                            'message': f"Retención no numérica en {cam['name']}"}), 400
+        if not 1 <= dias <= 365:
+            return jsonify({'status': 'error',
+                            'message': 'La retención debe estar entre 1 y 365 días'}), 400
+        payload.append({
+            'camera_id': cam['id'], 'name': cam['name'], 'source': cam['source'],
+            'enabled': bool(elegida.get('recording')), 'retention_days': dias,
+        })
+
+    try:
+        nvr_client.set_cameras(payload)
+    except nvr_client.NvrError as e:
+        return jsonify({'status': 'error', 'message': e.mensaje}), 502
+
+    activas = [c['name'] for c in payload if c['enabled']]
+    audit.log(audit.NVR_CAMERAS, target=f'{len(activas)} en grabación',
+              details={'camaras': ', '.join(activas) or 'ninguna'})
+    return jsonify({'status': 'success'})
+
+@app.route('/api/nvr/recordings/days', methods=['GET'])
+@login_required
+def nvr_recording_days():
+    try:
+        return jsonify(nvr_client.recording_days(request.args.get('camera_id', '')))
+    except nvr_client.NvrError as e:
+        return jsonify({'status': 'error', 'message': e.mensaje}), 502
+
+@app.route('/api/nvr/recordings/segments', methods=['GET'])
+@login_required
+def nvr_recording_segments():
+    try:
+        return jsonify(nvr_client.recording_segments(
+            request.args.get('camera_id', ''),
+            day=request.args.get('day'),
+            desde=request.args.get('from'),
+            hasta=request.args.get('to')))
+    except nvr_client.NvrError as e:
+        return jsonify({'status': 'error', 'message': e.mensaje}), 502
+
+@app.route('/api/nvr/recordings/at', methods=['GET'])
+@login_required
+def nvr_recording_at():
+    try:
+        return jsonify(nvr_client.recording_at(
+            request.args.get('camera_id', ''), request.args.get('at', '')))
+    except nvr_client.NvrError as e:
+        return jsonify({'status': 'error', 'message': e.mensaje}), 502
+
+@app.route('/api/nvr/segment/<int:segment_id>', methods=['GET'])
+@login_required
+def nvr_segment(segment_id):
+    """
+    Reenvía un segmento de vídeo desde el NVR al navegador.
+
+    Se retransmite por trozos y se conservan las cabeceras de rango: son las
+    que permiten al reproductor saltar dentro del vídeo sin descargarlo entero.
+    """
+    try:
+        remota = nvr_client.segment_stream(segment_id, request.headers.get('Range'))
+    except nvr_client.NvrError as e:
+        return jsonify({'status': 'error', 'message': e.mensaje}), 502
+
+    def retransmitir():
+        try:
+            for trozo in remota.iter_content(chunk_size=256 * 1024):
+                if trozo:
+                    yield trozo
+        finally:
+            remota.close()
+
+    cabeceras = {}
+    for h in ('Content-Range', 'Accept-Ranges', 'Content-Length'):
+        if h in remota.headers:
+            cabeceras[h] = remota.headers[h]
+
+    return Response(retransmitir(), status=remota.status_code,
+                    mimetype=remota.headers.get('Content-Type', 'video/mp4'),
+                    headers=cabeceras, direct_passthrough=True)
 
 @app.route('/api/detections/summary', methods=['GET'])
 @login_required

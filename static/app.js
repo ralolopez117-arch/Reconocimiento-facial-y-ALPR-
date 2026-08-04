@@ -904,6 +904,9 @@ document.querySelectorAll('.fr-tab').forEach(btn => {
         if (btn.dataset.tab === 'settings-tab-users') fetchUsers();
         if (btn.dataset.tab === 'settings-tab-session') fetchSecuritySettings();
         if (btn.dataset.tab === 'settings-tab-audit') fetchAuditLog();
+        if (btn.dataset.tab === 'settings-tab-nvr') {
+            fetchNvrSettings(); fetchNvrStatus(); fetchNvrCameras();
+        }
     });
 });
 
@@ -1727,4 +1730,191 @@ if (IS_ADMIN) {
         auditTimer = setTimeout(fetchAuditLog, 300);
     });
     document.getElementById('audit-action-filter').addEventListener('change', fetchAuditLog);
+}
+
+
+// ===========================================================================
+//  Servidor de grabaciones (NVR)
+// ===========================================================================
+
+function formatearBytes(n) {
+    if (!n) return '—';
+    const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return `${n.toFixed(i >= 2 ? 1 : 0)} ${u[i]}`;
+}
+
+async function fetchNvrSettings() {
+    const res = await fetch('/api/nvr/settings');
+    if (!res.ok) return;
+    const d = await res.json();
+    document.getElementById('nvr-url').value = d.url || '';
+    document.getElementById('nvr-enabled').checked = !!d.enabled;
+    document.getElementById('nvr-token-state').textContent =
+        d.has_token ? 'guardada' : 'sin configurar';
+}
+
+async function guardarNvrSettings() {
+    const cuerpo = {
+        url: document.getElementById('nvr-url').value.trim(),
+        enabled: document.getElementById('nvr-enabled').checked,
+        // Vacío significa "conserva la que hay", para poder cambiar solo la
+        // dirección sin tener que volver a pegar la clave.
+        token: document.getElementById('nvr-token').value.trim(),
+    };
+    const res = await fetch('/api/nvr/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cuerpo)
+    });
+    if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        mostrarEstadoNvr(false, d.message || 'No se pudo guardar');
+        return;
+    }
+    // La clave ya está en el servidor: se limpia del formulario para no
+    // dejarla visible en pantalla.
+    document.getElementById('nvr-token').value = '';
+    await fetchNvrSettings();
+    await fetchNvrStatus();
+    await fetchNvrCameras();
+}
+
+function mostrarEstadoNvr(ok, texto) {
+    const el = document.getElementById('nvr-status');
+    el.textContent = texto;
+    el.style.color = ok ? '#4ade80' : '#f87171';
+}
+
+async function fetchNvrStatus() {
+    mostrarEstadoNvr(true, 'Comprobando…');
+    try {
+        const d = await (await fetch('/api/nvr/status')).json();
+
+        if (!d.connected) {
+            mostrarEstadoNvr(false, `✖ ${d.message}`);
+            return;
+        }
+        if (!d.authenticated) {
+            // Distinguir esto de "no responde" importa: el problema y la
+            // solución son completamente distintos.
+            mostrarEstadoNvr(false, `✖ El servidor responde pero ${d.message}`);
+            return;
+        }
+
+        const alm = d.storage || {};
+        const grabando = (d.recorders || []).filter(r => r.recording).length;
+        const libre = alm.disk_free_bytes
+            ? `, ${formatearBytes(alm.disk_free_bytes)} libres en disco` : '';
+        mostrarEstadoNvr(true,
+            `✔ Conectado. ${grabando} cámara(s) grabando, `
+            + `${formatearBytes(alm.total_bytes)} almacenados${libre}.`);
+
+        // Un grabador que reintenta sin parar indica una cámara inalcanzable:
+        // conviene verlo aquí y no solo en el registro del servidor.
+        const fallando = (d.recorders || []).filter(r => !r.recording && r.retries > 0);
+        if (fallando.length) {
+            const el = document.getElementById('nvr-status');
+            el.textContent += ` Con problemas: ${fallando.map(r => r.name).join(', ')}.`;
+            el.style.color = '#fbbf24';
+        }
+    } catch (e) {
+        mostrarEstadoNvr(false, '✖ No se pudo consultar el estado');
+    }
+}
+
+let nvrCamaras = [];
+
+async function fetchNvrCameras() {
+    const res = await fetch('/api/nvr/cameras');
+    if (!res.ok) return;
+    const d = await res.json();
+    nvrCamaras = d.cameras || [];
+    renderNvrCameras(d.nvr_available, d.message);
+}
+
+function renderNvrCameras(disponible, mensaje) {
+    const tbody = document.getElementById('nvr-cameras-body');
+    tbody.innerHTML = '';
+
+    if (!nvrCamaras.length) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">'
+                        + 'No hay cámaras registradas</td></tr>';
+        return;
+    }
+
+    nvrCamaras.forEach((c, i) => {
+        const almacenado = c.days_recorded
+            ? `${c.days_recorded} día(s) · ${formatearBytes(c.bytes)}`
+              + (c.oldest_day ? `<br><span style="font-size:0.85em;">desde ${c.oldest_day}</span>` : '')
+            : '<span style="color:var(--text-muted);">sin grabaciones</span>';
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td style="text-align:center;">
+                <input type="checkbox" data-idx="${i}" class="nvr-rec-toggle"
+                       ${c.recording ? 'checked' : ''} ${disponible ? '' : 'disabled'}>
+            </td>
+            <td><strong>${c.name}</strong></td>
+            <td>
+                <input type="number" min="1" max="365" value="${c.retention_days}"
+                       data-idx="${i}" class="nvr-retention" ${disponible ? '' : 'disabled'}
+                       style="width:70px; padding:5px 8px; background:var(--bg-card);
+                              border:1px solid var(--border-color); border-radius:4px;
+                              color:var(--text-color);">
+            </td>
+            <td style="color:var(--text-muted); font-size:0.9em;">${almacenado}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    document.getElementById('nvr-save-cameras').disabled = !disponible;
+    if (!disponible && mensaje) {
+        const msg = document.getElementById('nvr-cameras-msg');
+        msg.textContent = `Sin conexión con el servidor: ${mensaje}`;
+        msg.style.color = '#f87171';
+        msg.classList.add('visible');
+    }
+}
+
+async function guardarNvrCameras() {
+    const seleccion = nvrCamaras.map((c, i) => {
+        const chk = document.querySelector(`.nvr-rec-toggle[data-idx="${i}"]`);
+        const dias = document.querySelector(`.nvr-retention[data-idx="${i}"]`);
+        return {
+            camera_id: c.camera_id,
+            recording: chk ? chk.checked : false,
+            retention_days: dias ? parseInt(dias.value, 10) || 3 : 3,
+        };
+    });
+
+    const res = await fetch('/api/nvr/cameras', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cameras: seleccion })
+    });
+    const d = await res.json().catch(() => ({}));
+    const msg = document.getElementById('nvr-cameras-msg');
+
+    if (res.ok) {
+        const n = seleccion.filter(c => c.recording).length;
+        msg.textContent = `✔ Aplicado: ${n} cámara(s) en grabación.`;
+        msg.style.color = '#4ade80';
+        setTimeout(() => { fetchNvrCameras(); fetchNvrStatus(); }, 1500);
+    } else {
+        msg.textContent = `✖ ${d.message || 'No se pudo aplicar'}`;
+        msg.style.color = '#f87171';
+    }
+    msg.classList.add('visible');
+    clearTimeout(guardarNvrCameras._t);
+    guardarNvrCameras._t = setTimeout(() => msg.classList.remove('visible'), 4000);
+}
+
+if (IS_ADMIN) {
+    document.getElementById('nvr-save').addEventListener('click', guardarNvrSettings);
+    document.getElementById('nvr-refresh').addEventListener('click', () => {
+        fetchNvrStatus(); fetchNvrCameras();
+    });
+    document.getElementById('nvr-save-cameras').addEventListener('click', guardarNvrCameras);
 }
