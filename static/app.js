@@ -1918,3 +1918,767 @@ if (IS_ADMIN) {
     });
     document.getElementById('nvr-save-cameras').addEventListener('click', guardarNvrCameras);
 }
+
+
+// ===========================================================================
+//  Reproductor de grabaciones
+// ===========================================================================
+//
+// El vídeo está troceado en segmentos de varios minutos, pero el usuario
+// razona en horas del día, no en archivos. Todo aquí traduce entre ambas
+// cosas: la línea de tiempo, el reloj y los saltos trabajan con la hora
+// absoluta, y se resuelve por debajo qué segmento la contiene y en qué
+// posición dentro de él.
+
+const PB = {
+    camara: null,
+    fecha: null,           // 'aaaa-mm-dd'
+    segmentos: [],
+    tramos: [],
+    indiceActual: -1,
+    velocidad: 1,
+    rebobinando: null,     // identificador del temporizador de rebobinado
+    arrastrando: false,
+    camarasConGrabacion: [],
+    // Ventana visible de la línea de tiempo: cuántos segundos abarca y
+    // en qué momento del día está centrada.
+    zoom: { span: 86400, centro: 43200 },
+};
+
+const PB_SEGUNDOS_DIA = 24 * 3600;
+
+// ---- Fechas y horas -------------------------------------------------------
+//
+// Se parte la cadena en vez de usar new Date(texto): el constructor
+// interpreta "aaaa-mm-dd hh:mm:ss" de forma inconsistente entre navegadores y
+// puede aplicar UTC, desplazando la hora que se muestra.
+
+function pbParsear(texto) {
+    if (!texto) return null;
+    const m = String(texto).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+    if (!m) return null;
+    return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+}
+
+function pbFormatearFechaHora(d) {
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} `
+         + `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function pbHoraDelDia(d) {
+    const p = n => String(n).padStart(2, '0');
+    return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/** Segundos transcurridos desde medianoche. Es la unidad de la línea de tiempo. */
+function pbSegundosDesdeMedianoche(d) {
+    return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+}
+
+// ---- Estado del reproductor ----------------------------------------------
+
+function pbVideo() { return document.getElementById('playback-video'); }
+
+function pbMostrarCargando(visible) {
+    document.getElementById('playback-loading').classList.toggle('visible', !!visible);
+}
+
+function pbInfo(texto) {
+    document.getElementById('playback-info').textContent = texto || '';
+}
+
+/** Instante absoluto que se está viendo, o null si no hay nada cargado. */
+function pbInstanteActual() {
+    const seg = PB.segmentos[PB.indiceActual];
+    if (!seg) return null;
+    const inicio = pbParsear(seg.started_at);
+    if (!inicio) return null;
+    return new Date(inicio.getTime() + pbVideo().currentTime * 1000);
+}
+
+// ---- Lista de cámaras -----------------------------------------------------
+
+async function pbCargarCamaras() {
+    try {
+        const d = await (await fetch('/api/nvr/cameras')).json();
+        PB.camarasConGrabacion = d.cameras || [];
+        if (!d.nvr_available) {
+            document.getElementById('playback-cam-list').innerHTML =
+                `<li class="playback-hint" style="padding:10px;">Sin conexión con el
+                 servidor de grabaciones.<br>${d.message || ''}</li>`;
+            return;
+        }
+    } catch (e) {
+        PB.camarasConGrabacion = [];
+    }
+    pbRenderCamaras();
+}
+
+function pbRenderCamaras() {
+    const filtro = document.getElementById('playback-cam-search').value.trim().toLowerCase();
+    const lista = document.getElementById('playback-cam-list');
+    lista.innerHTML = '';
+
+    const visibles = PB.camarasConGrabacion.filter(
+        c => !filtro || (c.name || '').toLowerCase().includes(filtro));
+
+    if (!visibles.length) {
+        lista.innerHTML = `<li class="playback-hint" style="padding:10px;">${
+            filtro ? 'Ninguna cámara coincide' : 'No hay cámaras'}</li>`;
+        return;
+    }
+
+    visibles.forEach(c => {
+        const tiene = c.days_recorded > 0;
+        const li = document.createElement('li');
+        li.className = 'playback-cam'
+            + (tiene ? '' : ' sin-grabacion')
+            + (PB.camara && PB.camara.camera_id === c.camera_id ? ' active' : '');
+        li.draggable = tiene;
+        li.innerHTML = `
+            <span class="cam-status-dot ${c.recording ? 'online' : 'offline'}"></span>
+            <span class="playback-cam-name">${c.name}</span>
+            <span class="playback-cam-days">${tiene ? c.days_recorded + 'd' : '—'}</span>`;
+
+        if (tiene) {
+            li.title = `${c.days_recorded} día(s) grabados`
+                     + (c.oldest_day ? `, desde ${c.oldest_day}` : '');
+            li.addEventListener('dragstart',
+                e => e.dataTransfer.setData('text/plain', JSON.stringify(c)));
+            li.addEventListener('dblclick', () => pbSeleccionarCamara(c));
+        } else {
+            li.title = 'Esta cámara no tiene grabaciones';
+        }
+        lista.appendChild(li);
+    });
+}
+
+// ---- Selección de cámara y día -------------------------------------------
+
+async function pbSeleccionarCamara(camara) {
+    PB.camara = camara;
+    pbRenderCamaras();
+    pbInfo(camara.name);
+
+    // Se abre por el día más reciente con grabación, que es lo que casi
+    // siempre se quiere ver al entrar.
+    let dia = camara.newest_day;
+    try {
+        const d = await (await fetch(
+            `/api/nvr/recordings/days?camera_id=${encodeURIComponent(camara.camera_id)}`)).json();
+        if (d.days && d.days.length) dia = d.days[0].day;
+    } catch (e) { /* se usa newest_day */ }
+
+    if (!dia) {
+        pbInfo(`${camara.name} — sin grabaciones`);
+        return;
+    }
+    document.getElementById('playback-date').value = dia;
+    await pbCargarDia(dia, true);
+}
+
+async function pbCargarDia(dia, irAlFinal = false) {
+    if (!PB.camara) return;
+    PB.fecha = dia;
+    // Cada día se abre completo: conservar el zoom del día anterior
+    // dejaría al usuario mirando un tramo arbitrario sin grabación.
+    PB.zoom = { span: 86400, centro: 43200 };
+    pbMostrarCargando(true);
+
+    try {
+        const url = `/api/nvr/recordings/segments?camera_id=${
+            encodeURIComponent(PB.camara.camera_id)}&day=${encodeURIComponent(dia)}`;
+        const d = await (await fetch(url)).json();
+        PB.segmentos = d.segments || [];
+        PB.tramos = d.ranges || [];
+    } catch (e) {
+        PB.segmentos = []; PB.tramos = [];
+    }
+
+    pbDibujarLineaDeTiempo();
+    pbMostrarCargando(false);
+
+    if (!PB.segmentos.length) {
+        pbInfo(`${PB.camara.name} — sin grabaciones el ${dia}`);
+        pbVideo().classList.remove('visible');
+        document.getElementById('playback-placeholder').style.display = 'block';
+        return;
+    }
+
+    await pbCargarSegmento(irAlFinal ? PB.segmentos.length - 1 : 0, 0, false);
+}
+
+// ---- Carga y encadenado de segmentos -------------------------------------
+
+async function pbCargarSegmento(indice, desplazamiento = 0, reproducir = true) {
+    if (indice < 0 || indice >= PB.segmentos.length) return false;
+
+    const seg = PB.segmentos[indice];
+    PB.indiceActual = indice;
+    const video = pbVideo();
+
+    document.getElementById('playback-placeholder').style.display = 'none';
+    video.classList.add('visible');
+    pbMostrarCargando(true);
+
+    video.src = `/api/nvr/segment/${seg.id}`;
+    video.playbackRate = PB.velocidad;
+
+    await new Promise(resolve => {
+        const listo = () => { limpiar(); resolve(); };
+        const fallo = () => { limpiar(); resolve(); };
+        const limpiar = () => {
+            video.removeEventListener('loadedmetadata', listo);
+            video.removeEventListener('error', fallo);
+        };
+        video.addEventListener('loadedmetadata', listo, { once: true });
+        video.addEventListener('error', fallo, { once: true });
+        // Si el segmento no carga, no dejar el reproductor colgado para siempre
+        setTimeout(listo, 8000);
+    });
+
+    if (desplazamiento > 0 && isFinite(video.duration)) {
+        video.currentTime = Math.min(desplazamiento, Math.max(0, video.duration - 0.1));
+    }
+    pbMostrarCargando(false);
+
+    if (reproducir) { try { await video.play(); } catch (e) { /* el navegador puede bloquearlo */ } }
+    pbActualizarBotones();
+    pbActualizarReloj();
+    return true;
+}
+
+/**
+ * Al terminar un segmento se encadena el siguiente automáticamente.
+ * Sin esto, la reproducción se detendría cada pocos minutos en cada corte de
+ * archivo, que es un detalle interno que el usuario no tiene por qué notar.
+ */
+async function pbSegmentoTerminado() {
+    if (PB.indiceActual + 1 < PB.segmentos.length) {
+        await pbCargarSegmento(PB.indiceActual + 1, 0, true);
+    } else {
+        pbPausar();
+        pbInfo(`${PB.camara.name} — fin de las grabaciones del día`);
+    }
+}
+
+// ---- Controles ------------------------------------------------------------
+
+function pbReproduciendo() {
+    const v = pbVideo();
+    return !v.paused && !v.ended && v.readyState > 2;
+}
+
+async function pbAlternarReproduccion() {
+    const v = pbVideo();
+    if (!v.src) return;
+    pbDetenerRebobinado();
+    if (v.paused) { try { await v.play(); } catch (e) {} }
+    else v.pause();
+    pbActualizarBotones();
+}
+
+function pbPausar() {
+    pbDetenerRebobinado();
+    pbVideo().pause();
+    pbActualizarBotones();
+}
+
+function pbFijarVelocidad(v) {
+    PB.velocidad = v;
+    pbVideo().playbackRate = v;
+    document.querySelectorAll('.pb-speed').forEach(b =>
+        b.classList.toggle('active', Number(b.dataset.speed) === v));
+    // El rebobinado usa la velocidad como paso, así que se reinicia para que
+    // el cambio se note de inmediato.
+    if (PB.rebobinando) { pbDetenerRebobinado(); pbRebobinar(); }
+}
+
+/**
+ * Rebobinado.
+ *
+ * El vídeo HTML no reproduce hacia atrás: playbackRate negativo no está
+ * soportado. Se emula retrocediendo la posición a intervalos regulares, y al
+ * llegar al principio del segmento se salta al final del anterior.
+ */
+function pbRebobinar() {
+    if (PB.rebobinando) { pbDetenerRebobinado(); return; }
+    const v = pbVideo();
+    if (!v.src) return;
+
+    v.pause();
+    const paso = 0.25;                    // segundos de reloj entre saltos
+    PB.rebobinando = setInterval(async () => {
+        const salto = paso * PB.velocidad;
+        if (v.currentTime - salto > 0.1) {
+            v.currentTime -= salto;
+        } else if (PB.indiceActual > 0) {
+            pbDetenerRebobinado();
+            await pbCargarSegmento(PB.indiceActual - 1, 1e6, false);
+            const vv = pbVideo();
+            if (isFinite(vv.duration)) vv.currentTime = Math.max(0, vv.duration - 0.2);
+            pbRebobinar();
+        } else {
+            pbDetenerRebobinado();
+        }
+        pbActualizarReloj();
+    }, paso * 1000);
+
+    document.getElementById('pb-rewind').classList.add('activo');
+    pbActualizarBotones();
+}
+
+function pbDetenerRebobinado() {
+    if (PB.rebobinando) {
+        clearInterval(PB.rebobinando);
+        PB.rebobinando = null;
+    }
+    document.getElementById('pb-rewind').classList.remove('activo');
+}
+
+function pbSaltar(segundos) {
+    const v = pbVideo();
+    if (!v.src) return;
+    const destino = v.currentTime + segundos;
+
+    if (destino < 0 && PB.indiceActual > 0) {
+        // Se sale por delante del segmento: continúa en el anterior
+        pbCargarSegmento(PB.indiceActual - 1, 1e6, pbReproduciendo());
+    } else if (isFinite(v.duration) && destino > v.duration
+               && PB.indiceActual + 1 < PB.segmentos.length) {
+        pbCargarSegmento(PB.indiceActual + 1, destino - v.duration, pbReproduciendo());
+    } else {
+        v.currentTime = Math.max(0, Math.min(destino, v.duration || 0));
+    }
+    pbActualizarReloj();
+}
+
+function pbActualizarBotones() {
+    const v = pbVideo();
+    const hay = !!v.src;
+    document.getElementById('pb-play').textContent =
+        (pbReproduciendo() || PB.rebobinando) ? '⏸' : '▶';
+    ['pb-play', 'pb-back10', 'pb-fwd10', 'pb-rewind', 'pb-fullscreen']
+        .forEach(id => { document.getElementById(id).disabled = !hay; });
+    document.getElementById('pb-prev').disabled = PB.indiceActual <= 0;
+    document.getElementById('pb-next').disabled =
+        PB.indiceActual < 0 || PB.indiceActual >= PB.segmentos.length - 1;
+}
+
+function pbActualizarReloj() {
+    const t = pbInstanteActual();
+    document.getElementById('pb-clock').textContent = t ? pbHoraDelDia(t) : '--:--:--';
+    pbSeguirCabezal();
+    pbActualizarCabezal();
+}
+
+// ---- Línea de tiempo ------------------------------------------------------
+
+// ---- Zoom de la línea de tiempo ------------------------------------------
+//
+// La línea muestra una ventana del día, no siempre las 24 horas. Con
+// grabaciones de días enteros, un día completo en unos cientos de píxeles hace
+// imposible situarse con precisión: cada píxel son casi dos minutos.
+//
+// Niveles pensados para bajar hasta el minuto sin pasos bruscos.
+const PB_NIVELES_ZOOM = [86400, 43200, 21600, 10800, 3600, 1800, 900, 300, 120];
+
+function pbNivelZoom() {
+    // Se devuelve el índice del nivel más cercano al tramo visible actual
+    let mejor = 0, dif = Infinity;
+    PB_NIVELES_ZOOM.forEach((s, i) => {
+        const d = Math.abs(s - PB.zoom.span);
+        if (d < dif) { dif = d; mejor = i; }
+    });
+    return mejor;
+}
+
+/** Tramo del día que se está mostrando, en segundos desde medianoche. */
+function pbVentana() {
+    const span = Math.max(60, Math.min(PB_SEGUNDOS_DIA, PB.zoom.span));
+    let inicio = PB.zoom.centro - span / 2;
+    // Sujetar a los límites del día: sin esto se podría desplazar la ventana
+    // fuera del día y quedarse mirando una franja vacía.
+    inicio = Math.max(0, Math.min(inicio, PB_SEGUNDOS_DIA - span));
+    return { inicio, fin: inicio + span, span };
+}
+
+function pbFormatearSpan(s) {
+    if (s >= 3600) {
+        const h = s / 3600;
+        return `${Number.isInteger(h) ? h : h.toFixed(1)} h`;
+    }
+    return `${Math.round(s / 60)} min`;
+}
+
+function pbAplicarZoom(indice, centroDeseado = null) {
+    indice = Math.max(0, Math.min(PB_NIVELES_ZOOM.length - 1, indice));
+    PB.zoom.span = PB_NIVELES_ZOOM[indice];
+
+    if (centroDeseado !== null) {
+        PB.zoom.centro = centroDeseado;
+    } else {
+        // Al ampliar sin punto de referencia se centra en lo que se está
+        // viendo, que es lo que el usuario quiere mirar de cerca.
+        const t = pbInstanteActual();
+        if (t) PB.zoom.centro = pbSegundosDesdeMedianoche(t);
+    }
+
+    pbDibujarLineaDeTiempo();
+    pbActualizarControlesZoom();
+}
+
+function pbActualizarControlesZoom() {
+    const i = pbNivelZoom();
+    document.getElementById('pb-zoom-label').textContent =
+        pbFormatearSpan(PB.zoom.span);
+    document.getElementById('pb-zoom-out').disabled = i <= 0;
+    document.getElementById('pb-zoom-in').disabled = i >= PB_NIVELES_ZOOM.length - 1;
+    // La miniatura solo aporta cuando no se ve el día entero
+    document.getElementById('pb-minimap')
+        .classList.toggle('visible', PB.zoom.span < PB_SEGUNDOS_DIA);
+}
+
+/**
+ * Mantiene el cabezal dentro de la ventana mientras se reproduce.
+ *
+ * Ampliada la línea, el cabezal se saldría por la derecha en segundos y habría
+ * que reencuadrar a mano constantemente.
+ */
+function pbSeguirCabezal() {
+    if (PB.zoom.span >= PB_SEGUNDOS_DIA || PB.arrastrando) return;
+    const t = pbInstanteActual();
+    if (!t) return;
+
+    const s = pbSegundosDesdeMedianoche(t);
+    const v = pbVentana();
+    const margen = v.span * 0.1;
+    if (s < v.inicio + margen || s > v.fin - margen) {
+        PB.zoom.centro = s;
+        pbDibujarLineaDeTiempo();
+    }
+}
+
+function pbDibujarLineaDeTiempo() {
+    const v = pbVentana();
+    const track = document.getElementById('pb-timeline-track');
+    track.innerHTML = '';
+
+    PB.tramos.forEach(r => {
+        const ini = pbParsear(r.start), fin = pbParsear(r.end);
+        if (!ini || !fin) return;
+        const a = pbSegundosDesdeMedianoche(ini);
+        const b = Math.max(a + 1, pbSegundosDesdeMedianoche(fin));
+        // Recortar a la ventana visible; los tramos fuera no se dibujan
+        const va = Math.max(a, v.inicio), vb = Math.min(b, v.fin);
+        if (vb <= va) return;
+
+        const div = document.createElement('div');
+        div.className = 'pb-range';
+        div.style.left = `${((va - v.inicio) / v.span) * 100}%`;
+        div.style.width = `${((vb - va) / v.span) * 100}%`;
+        div.title = `${pbHoraDelDia(ini)} — ${pbHoraDelDia(fin)}`;
+        track.appendChild(div);
+    });
+
+    pbDibujarMarcasHorarias(v);
+    pbDibujarMiniatura(v);
+    pbActualizarCabezal();
+}
+
+/**
+ * Marcas de tiempo adaptadas al zoom.
+ *
+ * Un intervalo fijo deja de servir al ampliar: con 2 minutos a la vista,
+ * marcas cada 3 horas no muestran ninguna.
+ */
+function pbDibujarMarcasHorarias(v) {
+    const contenedor = document.getElementById('pb-hours');
+    contenedor.innerHTML = '';
+
+    // Se busca el intervalo más amplio que aún produzca al menos 4 marcas.
+    // Elegir sin más el mayor que "quepa" dejaba la escala vacía al ampliar:
+    // con una hora a la vista y marcas cada tres, no caía ninguna dentro.
+    const pasos = [10800, 3600, 1800, 900, 300, 120, 60, 30, 10, 5];
+    const paso = pasos.find(p => v.span / p >= 4) || 5;
+
+    const p = n => String(n).padStart(2, '0');
+    const primera = Math.ceil(v.inicio / paso) * paso;
+
+    for (let s = primera; s <= v.fin; s += paso) {
+        const span = document.createElement('span');
+        span.textContent = paso >= 3600
+            ? `${p(Math.floor(s / 3600))}:00`
+            : `${p(Math.floor(s / 3600))}:${p(Math.floor(s / 60) % 60)}`
+              + (paso < 60 ? `:${p(s % 60)}` : '');
+        contenedor.appendChild(span);
+    }
+}
+
+/** Franja con el día completo y un recuadro sobre el tramo ampliado. */
+function pbDibujarMiniatura(v) {
+    const track = document.getElementById('pb-minimap-track');
+    track.innerHTML = '';
+
+    PB.tramos.forEach(r => {
+        const ini = pbParsear(r.start), fin = pbParsear(r.end);
+        if (!ini || !fin) return;
+        const a = pbSegundosDesdeMedianoche(ini);
+        const b = Math.max(a + 1, pbSegundosDesdeMedianoche(fin));
+        const div = document.createElement('div');
+        div.className = 'pb-minimap-range';
+        div.style.left = `${(a / PB_SEGUNDOS_DIA) * 100}%`;
+        div.style.width = `${((b - a) / PB_SEGUNDOS_DIA) * 100}%`;
+        track.appendChild(div);
+    });
+
+    const ventana = document.getElementById('pb-minimap-window');
+    ventana.style.left = `${(v.inicio / PB_SEGUNDOS_DIA) * 100}%`;
+    ventana.style.width = `${(v.span / PB_SEGUNDOS_DIA) * 100}%`;
+}
+
+function pbActualizarCabezal() {
+    const cabezal = document.getElementById('pb-playhead');
+    const t = pbInstanteActual();
+    if (!t) { cabezal.classList.remove('visible'); return; }
+
+    const v = pbVentana();
+    const s = pbSegundosDesdeMedianoche(t);
+    // Fuera de la ventana no se dibuja, en lugar de pegarlo a un extremo y
+    // dar a entender que está ahí.
+    if (s < v.inicio || s > v.fin) { cabezal.classList.remove('visible'); return; }
+
+    cabezal.classList.add('visible');
+    cabezal.style.left = `${((s - v.inicio) / v.span) * 100}%`;
+}
+
+/** Hora del día correspondiente a una posición horizontal de la línea. */
+function pbHoraEnPosicion(clientX) {
+    const linea = document.getElementById('pb-timeline');
+    const r = linea.getBoundingClientRect();
+    const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    const v = pbVentana();
+    const segundos = Math.floor(v.inicio + frac * v.span);
+    const p = n => String(n).padStart(2, '0');
+    return { segundos,
+             texto: `${p(Math.floor(segundos / 3600))}:${p(Math.floor(segundos / 60) % 60)}:${p(segundos % 60)}` };
+}
+
+async function pbIrAHoraDelDia(segundos) {
+    if (!PB.camara || !PB.fecha) return;
+    const p = n => String(n).padStart(2, '0');
+    const momento = `${PB.fecha} ${p(Math.floor(segundos / 3600))}:`
+                  + `${p(Math.floor(segundos / 60) % 60)}:${p(segundos % 60)}`;
+    await pbIrAInstante(momento);
+}
+
+async function pbIrAInstante(momento) {
+    if (!PB.camara) return;
+    pbMostrarCargando(true);
+    try {
+        const url = `/api/nvr/recordings/at?camera_id=${
+            encodeURIComponent(PB.camara.camera_id)}&at=${encodeURIComponent(momento)}`;
+        const d = await (await fetch(url)).json();
+
+        if (!d.segment) {
+            pbMostrarCargando(false);
+            showToast('No hay grabación en ese momento.');
+            return;
+        }
+
+        // El instante puede caer en otro día del que está cargado
+        const diaDestino = d.segment.day;
+        if (diaDestino !== PB.fecha) {
+            document.getElementById('playback-date').value = diaDestino;
+            PB.fecha = diaDestino;
+            const su = `/api/nvr/recordings/segments?camera_id=${
+                encodeURIComponent(PB.camara.camera_id)}&day=${encodeURIComponent(diaDestino)}`;
+            const sd = await (await fetch(su)).json();
+            PB.segmentos = sd.segments || [];
+            PB.tramos = sd.ranges || [];
+            pbDibujarLineaDeTiempo();
+        }
+
+        const idx = PB.segmentos.findIndex(s => s.id === d.segment.id);
+        if (idx >= 0) await pbCargarSegmento(idx, d.offset || 0, pbReproduciendo());
+    } catch (e) {
+        showToast('No se pudo saltar a ese momento.');
+    }
+    pbMostrarCargando(false);
+}
+
+// ---- Enlazado de la interfaz ---------------------------------------------
+
+(function pbInicializar() {
+    const overlay = document.getElementById('playback-overlay');
+    const video = pbVideo();
+    const linea = document.getElementById('pb-timeline');
+    const zona = document.getElementById('playback-drop');
+
+    document.getElementById('open-playback-btn').addEventListener('click', () => {
+        overlay.classList.add('active');
+        pbCargarCamaras();
+        pbActualizarControlesZoom();
+    });
+
+    document.getElementById('playback-close').addEventListener('click', () => {
+        // Detener la descarga al cerrar: si no, el vídeo sigue bajando datos
+        // del servidor con el panel oculto.
+        pbPausar();
+        video.removeAttribute('src');
+        video.load();
+        overlay.classList.remove('active');
+    });
+
+    document.getElementById('playback-cam-search')
+        .addEventListener('input', pbRenderCamaras);
+
+    // Arrastrar y soltar una cámara sobre el reproductor
+    zona.addEventListener('dragover', e => {
+        e.preventDefault();
+        zona.classList.add('drag-over');
+    });
+    zona.addEventListener('dragleave', () => zona.classList.remove('drag-over'));
+    zona.addEventListener('drop', e => {
+        e.preventDefault();
+        zona.classList.remove('drag-over');
+        try {
+            pbSeleccionarCamara(JSON.parse(e.dataTransfer.getData('text/plain')));
+        } catch (err) { /* arrastre de otra cosa */ }
+    });
+
+    // Controles
+    document.getElementById('pb-play').addEventListener('click', pbAlternarReproduccion);
+    document.getElementById('pb-rewind').addEventListener('click', pbRebobinar);
+    document.getElementById('pb-back10').addEventListener('click', () => pbSaltar(-10));
+    document.getElementById('pb-fwd10').addEventListener('click', () => pbSaltar(10));
+    document.getElementById('pb-prev').addEventListener('click',
+        () => pbCargarSegmento(PB.indiceActual - 1, 0, pbReproduciendo()));
+    document.getElementById('pb-next').addEventListener('click',
+        () => pbCargarSegmento(PB.indiceActual + 1, 0, pbReproduciendo()));
+
+    document.querySelectorAll('.pb-speed').forEach(b =>
+        b.addEventListener('click', () => pbFijarVelocidad(Number(b.dataset.speed))));
+
+    document.getElementById('pb-live').addEventListener('click', async () => {
+        if (!PB.camara) return;
+        await pbSeleccionarCamara(PB.camara);
+        if (PB.segmentos.length) {
+            await pbCargarSegmento(PB.segmentos.length - 1, 1e6, false);
+        }
+    });
+
+    document.getElementById('pb-fullscreen').addEventListener('click', () => {
+        const el = document.getElementById('playback-drop');
+        if (document.fullscreenElement) document.exitFullscreen();
+        else el.requestFullscreen?.();
+    });
+
+    // Fecha y hora
+    document.getElementById('playback-date').addEventListener('change', e => {
+        if (e.target.value) pbCargarDia(e.target.value, false);
+    });
+    document.getElementById('playback-goto').addEventListener('click', () => {
+        const f = document.getElementById('playback-date').value;
+        const h = document.getElementById('playback-time').value || '00:00:00';
+        if (f) pbIrAInstante(`${f} ${h.length === 5 ? h + ':00' : h}`);
+    });
+
+    // Línea de tiempo: clic, arrastre y hora bajo el cursor
+    const hover = document.getElementById('pb-hover-time');
+
+    linea.addEventListener('mousemove', e => {
+        const { texto } = pbHoraEnPosicion(e.clientX);
+        const r = linea.getBoundingClientRect();
+        hover.style.display = 'block';
+        hover.style.left = `${e.clientX - r.left}px`;
+        hover.textContent = texto;
+        if (PB.arrastrando) pbActualizarCabezalTemporal(e.clientX);
+    });
+    linea.addEventListener('mouseleave', () => { hover.style.display = 'none'; });
+
+    linea.addEventListener('mousedown', e => {
+        PB.arrastrando = true;
+        pbActualizarCabezalTemporal(e.clientX);
+    });
+
+    // El soltar se escucha en el documento: al arrastrar rápido el puntero
+    // suele salirse de la barra antes de levantar el botón.
+    document.addEventListener('mouseup', e => {
+        if (!PB.arrastrando) return;
+        PB.arrastrando = false;
+        const { segundos } = pbHoraEnPosicion(e.clientX);
+        pbIrAHoraDelDia(segundos);
+    });
+
+    // --- Zoom de la línea de tiempo ---
+    document.getElementById('pb-zoom-in').addEventListener('click',
+        () => pbAplicarZoom(pbNivelZoom() + 1));
+    document.getElementById('pb-zoom-out').addEventListener('click',
+        () => pbAplicarZoom(pbNivelZoom() - 1));
+    document.getElementById('pb-zoom-fit').addEventListener('click',
+        () => pbAplicarZoom(0, PB_SEGUNDOS_DIA / 2));
+
+    // Rueda del ratón: se amplía manteniendo fijo el instante bajo el cursor,
+    // que es como se espera que funcione un zoom sobre una gráfica.
+    linea.addEventListener('wheel', e => {
+        e.preventDefault();
+        const { segundos } = pbHoraEnPosicion(e.clientX);
+
+        const nivel = Math.max(0, Math.min(PB_NIVELES_ZOOM.length - 1,
+                                           pbNivelZoom() + (e.deltaY < 0 ? 1 : -1)));
+        const nuevoSpan = PB_NIVELES_ZOOM[nivel];
+
+        // Centrar en el cursor NO basta: desplazaría ese instante al medio de
+        // la pantalla. Para dejarlo donde está hay que conservar su posición
+        // relativa dentro de la ventana.
+        const r = linea.getBoundingClientRect();
+        const frac = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+        const centro = segundos + nuevoSpan * (0.5 - frac);
+
+        pbAplicarZoom(nivel, centro);
+    }, { passive: false });
+
+    // Clic en la miniatura: desplaza la ventana ampliada a esa zona del día
+    const mini = document.getElementById('pb-minimap');
+    mini.addEventListener('click', e => {
+        const r = mini.getBoundingClientRect();
+        const frac = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+        PB.zoom.centro = frac * PB_SEGUNDOS_DIA;
+        pbDibujarLineaDeTiempo();
+    });
+
+    // Eventos del vídeo
+    video.addEventListener('ended', pbSegmentoTerminado);
+    video.addEventListener('timeupdate', pbActualizarReloj);
+    video.addEventListener('play', pbActualizarBotones);
+    video.addEventListener('pause', pbActualizarBotones);
+
+    // Atajos de teclado, solo con el reproductor abierto y fuera de un campo
+    document.addEventListener('keydown', e => {
+        if (!overlay.classList.contains('active')) return;
+        if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+
+        const acciones = {
+            ' ': () => pbAlternarReproduccion(),
+            ArrowLeft: () => pbSaltar(-10),
+            ArrowRight: () => pbSaltar(10),
+            ArrowDown: () => pbSaltar(-60),
+            ArrowUp: () => pbSaltar(60),
+            '+': () => pbAplicarZoom(pbNivelZoom() + 1),
+            '-': () => pbAplicarZoom(pbNivelZoom() - 1),
+            '0': () => pbAplicarZoom(0, PB_SEGUNDOS_DIA / 2),
+        };
+        if (acciones[e.key]) { e.preventDefault(); acciones[e.key](); }
+    });
+})();
+
+function pbActualizarCabezalTemporal(clientX) {
+    const linea = document.getElementById('pb-timeline');
+    const r = linea.getBoundingClientRect();
+    const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    const cabezal = document.getElementById('pb-playhead');
+    cabezal.classList.add('visible');
+    cabezal.style.left = `${frac * 100}%`;
+}

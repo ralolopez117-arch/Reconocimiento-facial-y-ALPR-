@@ -806,6 +806,455 @@ body.is-admin .admin-only {
     border-color: var(--primary);
 }
 
+/* ===========================================================================
+   Reproductor de grabaciones
+   =========================================================================== */
+.playback-modal {
+    width: 1200px;
+    max-width: 96vw;
+    height: 88vh;
+    display: flex;
+    flex-direction: column;
+    padding: 18px;
+}
+
+.playback-header-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.playback-date-label {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.playback-date {
+    padding: 5px 8px;
+    font-size: 13px;
+    color: var(--text-color);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    outline: none;
+}
+
+.playback-mini-btn {
+    padding: 5px 12px !important;
+    font-size: 13px;
+}
+
+/* min-height: 0 permite que el área de vídeo encoja dentro del flex y deje
+   sitio a los controles y la línea de tiempo. Sin esto, un vídeo alto empuja
+   la línea de tiempo fuera del panel. */
+.playback-body {
+    display: flex;
+    gap: 12px;
+    flex: 1;
+    min-height: 0;
+    margin-bottom: 10px;
+}
+
+/* ---- Lista de cámaras ---- */
+.playback-sidebar {
+    width: 210px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+}
+
+.playback-search {
+    padding: 7px 10px;
+    font-size: 13px;
+    color: var(--text-color);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    outline: none;
+}
+
+.playback-search:focus { border-color: var(--primary); }
+
+.playback-cam-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+.playback-cam {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 10px;
+    margin-bottom: 6px;
+    font-size: 13px;
+    background: var(--surface-1);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: grab;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.playback-cam:hover { background: var(--surface-3); }
+.playback-cam:active { cursor: grabbing; }
+
+.playback-cam.active {
+    border-color: var(--primary);
+    background: var(--accent-soft);
+}
+
+/* Sin grabaciones: se muestra igualmente, atenuada, para que se vea que la
+   cámara existe pero no está siendo grabada. */
+.playback-cam.sin-grabacion {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.playback-cam-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.playback-cam-days {
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.playback-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.4;
+    margin: 0;
+}
+
+/* ---- Área de vídeo ---- */
+.playback-main {
+    flex: 1;
+    min-width: 0;
+    position: relative;
+    background: #000;
+    border: 2px dashed var(--border-color);
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.playback-main.drag-over { border-color: var(--primary); }
+
+#playback-video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: none;
+    background: #000;
+}
+
+#playback-video.visible { display: block; }
+
+.playback-placeholder {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+    pointer-events: none;
+}
+
+.playback-overlay-info {
+    position: absolute;
+    top: 8px;
+    left: 10px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #e2e8f0;
+    background: rgba(0,0,0,0.6);
+    border-radius: 6px;
+    pointer-events: none;
+}
+
+.playback-loading {
+    position: absolute;
+    padding: 8px 16px;
+    font-size: 13px;
+    color: #e2e8f0;
+    background: rgba(0,0,0,0.7);
+    border-radius: 6px;
+    display: none;
+}
+
+.playback-loading.visible { display: block; }
+
+/* ---- Controles ---- */
+.playback-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding: 8px 4px;
+}
+
+.pb-btn {
+    padding: 6px 11px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-main);
+    background: var(--surface-2);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.pb-btn:hover:not(:disabled) {
+    background: var(--surface-4);
+    border-color: var(--primary);
+}
+
+.pb-btn:disabled { opacity: 0.35; cursor: default; }
+
+.pb-btn.pb-play {
+    min-width: 46px;
+    font-size: 15px;
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+}
+
+.pb-btn.pb-play:hover:not(:disabled) { background: var(--primary-hover); }
+
+/* Rebobinado activo: se resalta porque no hay indicación nativa de que el
+   vídeo va hacia atrás. */
+.pb-btn.activo {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+}
+
+.pb-speeds {
+    display: flex;
+    gap: 3px;
+    margin-left: 8px;
+    padding: 3px;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
+}
+
+.pb-speed {
+    padding: 4px 9px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.pb-speed:hover { color: var(--text-main); }
+
+.pb-speed.active {
+    background: var(--primary);
+    color: #fff;
+}
+
+.pb-clock {
+    margin-left: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-main);
+}
+
+.pb-right {
+    margin-left: auto;
+    display: flex;
+    gap: 6px;
+}
+
+/* ---- Línea de tiempo ---- */
+.playback-timeline-wrap { padding: 0 4px 2px; }
+
+/* ---- Controles de zoom ---- */
+.pb-zoom-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 5px;
+}
+
+.pb-zoom-btn {
+    width: 26px;
+    height: 24px;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--text-main);
+    background: var(--surface-2);
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.pb-zoom-btn:hover:not(:disabled) {
+    background: var(--surface-4);
+    border-color: var(--primary);
+}
+
+.pb-zoom-btn:disabled { opacity: 0.3; cursor: default; }
+
+.pb-zoom-btn.pb-zoom-fit {
+    width: auto;
+    padding: 0 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.pb-zoom-label {
+    min-width: 52px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--primary);
+}
+
+.pb-zoom-hint {
+    margin-left: auto;
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+/* ---- Miniatura del día completo ----
+   Al ampliar, la línea principal deja de mostrar las 24 h y se pierde la
+   referencia de dónde se está mirando. Esta franja conserva siempre el día
+   entero e indica con un recuadro el tramo visible arriba. */
+.pb-minimap {
+    position: relative;
+    height: 14px;
+    margin-top: 4px;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    overflow: hidden;
+    cursor: pointer;
+    display: none;
+}
+
+.pb-minimap.visible { display: block; }
+
+.pb-minimap-track { position: absolute; inset: 0; }
+
+.pb-minimap-range {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    background: var(--primary);
+    opacity: 0.55;
+    border-radius: 2px;
+}
+
+.pb-minimap-window {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: rgba(248,113,113,0.18);
+    border-left: 2px solid #f87171;
+    border-right: 2px solid #f87171;
+    pointer-events: none;
+}
+
+.pb-timeline {
+    position: relative;
+    height: 42px;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
+    cursor: pointer;
+    overflow: hidden;
+}
+
+/* Los tramos con grabación se pintan aquí dentro */
+.pb-timeline-track {
+    position: absolute;
+    inset: 0;
+}
+
+.pb-range {
+    position: absolute;
+    top: 6px;
+    bottom: 6px;
+    background: linear-gradient(180deg, var(--primary), var(--primary-hover));
+    border-radius: 3px;
+    opacity: 0.75;
+}
+
+.pb-playhead {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #f87171;
+    box-shadow: 0 0 6px rgba(248,113,113,0.8);
+    pointer-events: none;
+    display: none;
+}
+
+.pb-playhead.visible { display: block; }
+
+.pb-playhead::after {
+    content: '';
+    position: absolute;
+    top: -1px;
+    left: -4px;
+    width: 10px;
+    height: 10px;
+    background: #f87171;
+    border-radius: 50%;
+}
+
+/* Hora bajo el cursor: sin esto, arrastrar la línea de tiempo es a ciegas */
+.pb-hover-time {
+    position: absolute;
+    top: 3px;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: #e2e8f0;
+    background: rgba(0,0,0,0.8);
+    border-radius: 4px;
+    pointer-events: none;
+    display: none;
+    white-space: nowrap;
+    transform: translateX(-50%);
+}
+
+.pb-hours {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 3px;
+    font-size: 10px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+/* En pantallas estrechas la barra lateral estorba más de lo que ayuda */
+@media (max-width: 820px) {
+    .playback-sidebar { display: none; }
+    .playback-modal { height: 92vh; }
+}
+
 /* ---- Modal de Configuración ---- */
 
 /* Texto explicativo al inicio de cada pestaña */

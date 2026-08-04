@@ -36,6 +36,7 @@
             <!-- Compact icon-only buttons for FR and ALPR -->
             <button id="open-fr-btn" class="btn-secondary" title="Reconocimiento Facial" style="padding: 7px 10px; white-space: nowrap;">👤 <span class="nav-label">Reconocimiento Facial</span></button>
             <button id="open-alpr-btn" class="btn-secondary" title="Placas (ALPR)" style="padding: 7px 10px; white-space: nowrap;">🚗 <span class="nav-label">Placas (ALPR)</span></button>
+            <button id="open-playback-btn" class="btn-secondary" title="Grabaciones" style="padding: 7px 10px; white-space: nowrap;">⏱ <span class="nav-label">Grabaciones</span></button>
             <button id="open-settings-btn" class="btn-secondary" title="Configuración" style="padding: 7px 10px; white-space: nowrap;">⚙ <span class="nav-label">Configuración</span></button>
             <!-- Layout selector + clear button -->
             <div style="display:flex; align-items:center; gap:5px; background: rgba(0,0,0,0.25); padding: 4px 6px; border-radius: 8px; border: 1px solid var(--border-color); flex-shrink: 0;">
@@ -300,6 +301,101 @@
                             <!-- Filled by JS -->
                         </tbody>
                     </table>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Reproductor de grabaciones -->
+    <div class="modal-overlay" id="playback-overlay">
+        <div class="modal playback-modal">
+
+            <div class="alpr-header">
+                <h3>⏱ Grabaciones</h3>
+                <div class="playback-header-tools">
+                    <label for="playback-date" class="playback-date-label">Fecha</label>
+                    <input type="date" id="playback-date" class="playback-date">
+                    <input type="time" id="playback-time" class="playback-date" step="1"
+                           title="Ir a una hora concreta">
+                    <button id="playback-goto" class="btn-secondary playback-mini-btn"
+                            title="Saltar a esa fecha y hora">Ir</button>
+                    <button id="playback-close" class="btn-icon">×</button>
+                </div>
+            </div>
+
+            <div class="playback-body">
+                <!-- Cámaras disponibles -->
+                <aside class="playback-sidebar">
+                    <input type="text" id="playback-cam-search"
+                           class="playback-search" placeholder="🔍 Buscar cámara...">
+                    <ul id="playback-cam-list" class="playback-cam-list"></ul>
+                    <p class="playback-hint">
+                        Arrastra una cámara al reproductor, o haz doble clic.
+                    </p>
+                </aside>
+
+                <!-- Vídeo -->
+                <div class="playback-main" id="playback-drop">
+                    <video id="playback-video" playsinline preload="auto"></video>
+
+                    <div class="playback-placeholder" id="playback-placeholder">
+                        <div style="font-size:38px; opacity:.5;">⏱</div>
+                        <p>Arrastra aquí una cámara para ver sus grabaciones</p>
+                    </div>
+
+                    <div class="playback-overlay-info" id="playback-info"></div>
+                    <div class="playback-loading" id="playback-loading">Cargando…</div>
+                </div>
+            </div>
+
+            <!-- Controles -->
+            <div class="playback-controls">
+                <button id="pb-prev" class="pb-btn" title="Segmento anterior">⏮</button>
+                <button id="pb-back10" class="pb-btn" title="Retroceder 10 s">-10s</button>
+                <button id="pb-rewind" class="pb-btn" title="Rebobinar">◀◀</button>
+                <button id="pb-play" class="pb-btn pb-play" title="Reproducir o pausar">▶</button>
+                <button id="pb-fwd10" class="pb-btn" title="Avanzar 10 s">+10s</button>
+                <button id="pb-next" class="pb-btn" title="Segmento siguiente">⏭</button>
+
+                <div class="pb-speeds" id="pb-speeds">
+                    <button class="pb-speed active" data-speed="1">x1</button>
+                    <button class="pb-speed" data-speed="2">x2</button>
+                    <button class="pb-speed" data-speed="4">x4</button>
+                    <button class="pb-speed" data-speed="6">x6</button>
+                    <button class="pb-speed" data-speed="8">x8</button>
+                </div>
+
+                <span class="pb-clock" id="pb-clock">--:--:--</span>
+
+                <div class="pb-right">
+                    <button id="pb-live" class="pb-btn" title="Ir a lo más reciente">Último</button>
+                    <button id="pb-fullscreen" class="pb-btn" title="Pantalla completa">⛶</button>
+                </div>
+            </div>
+
+            <!-- Línea de tiempo del día -->
+            <div class="playback-timeline-wrap">
+                <div class="pb-zoom-bar">
+                    <button id="pb-zoom-out" class="pb-zoom-btn" title="Contraer: abarcar más tiempo">−</button>
+                    <span id="pb-zoom-label" class="pb-zoom-label">24 h</span>
+                    <button id="pb-zoom-in" class="pb-zoom-btn" title="Estirar: ampliar el detalle">+</button>
+                    <button id="pb-zoom-fit" class="pb-zoom-btn pb-zoom-fit"
+                            title="Ver el día completo">Día completo</button>
+                    <span class="pb-zoom-hint">También con la rueda del ratón sobre la línea</span>
+                </div>
+                <div class="pb-timeline" id="pb-timeline"
+                     title="Arrastra para moverte. Rueda para ampliar o contraer.">
+                    <div class="pb-timeline-track" id="pb-timeline-track"></div>
+                    <div class="pb-playhead" id="pb-playhead"></div>
+                    <div class="pb-hover-time" id="pb-hover-time"></div>
+                </div>
+                <div class="pb-hours" id="pb-hours"></div>
+                <!-- Miniatura del día completo: al ampliar se pierde la noción de
+                     dónde se está mirando, y esta franja lo devuelve. -->
+                <div class="pb-minimap" id="pb-minimap">
+                    <div class="pb-minimap-track" id="pb-minimap-track"></div>
+                    <div class="pb-minimap-window" id="pb-minimap-window"></div>
                 </div>
             </div>
 
