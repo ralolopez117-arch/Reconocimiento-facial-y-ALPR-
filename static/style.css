@@ -663,16 +663,53 @@ body {
 /* Iconos de los botones de la barra, en sustitución de los emojis.
    Son insignias circulares con su propio fondo oscuro, así que no heredan el
    color del texto: no sirve teñirlas con currentColor como a los SVG. */
-/* 28 px, el mismo tamaño que el logotipo de al lado.
-   Son insignias con mucho detalle interno, rótulos incluidos: a 20 px la línea
-   se perdía y las cuatro se confundían en el mismo círculo turquesa, que es lo
-   contrario de lo que hace falta cuando la barra se estrecha y oculta las
-   etiquetas de texto. Crecer no cuesta nada, porque la altura de la barra la
-   fija la ficha de usuario (48 px), no estos botones. */
+/* Iconos de las cuatro funciones, en sustitución de los emojis.
+
+   Van como fondo de un <span> vacío en lugar de como <img> para que cada tema
+   pueda tener su propia versión: así el navegador descarga solo la variante
+   que aplica, mientras que dos <img> superpuestas se traerían las dos.
+
+   28 px, el mismo tamaño que el logotipo de al lado. La altura de la barra la
+   fija la ficha de usuario (48 px), no estos botones, así que crecer no
+   desplaza nada. */
 .nav-icon {
     width: 28px;
     height: 28px;
     flex-shrink: 0;
+    display: inline-block;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+}
+
+/* Las rutas son relativas a este archivo, que se sirve desde /static/,
+   de modo que img/… apunta a /static/img/… */
+:root[data-theme="dark"] .nav-icon[data-icono="alpr"] {
+    background-image: url("img/nav-alpr-dark.png");
+}
+:root[data-theme="light"] .nav-icon[data-icono="alpr"] {
+    background-image: url("img/nav-alpr-light.png");
+}
+
+:root[data-theme="dark"] .nav-icon[data-icono="grabaciones"] {
+    background-image: url("img/nav-grabaciones-dark.png");
+}
+:root[data-theme="light"] .nav-icon[data-icono="grabaciones"] {
+    background-image: url("img/nav-grabaciones-light.png");
+}
+
+:root[data-theme="dark"] .nav-icon[data-icono="configuracion"] {
+    background-image: url("img/nav-configuracion-dark.png");
+}
+:root[data-theme="light"] .nav-icon[data-icono="configuracion"] {
+    background-image: url("img/nav-configuracion-light.png");
+}
+
+:root[data-theme="dark"] .nav-icon[data-icono="reconocimiento-facial"] {
+    background-image: url("img/nav-reconocimiento-facial-dark.png");
+}
+:root[data-theme="light"] .nav-icon[data-icono="reconocimiento-facial"] {
+    background-image: url("img/nav-reconocimiento-facial-light.png");
 }
 
 /* Los botones pasan a ser caja flexible para que icono y etiqueta queden
@@ -687,18 +724,6 @@ body {
     gap: 7px;
     padding: 4px 10px;
     white-space: nowrap;
-}
-
-/* Las insignias están dibujadas en turquesa luminoso sobre fondo oscuro, que es
-   donde funcionan. Sobre la barra clara, las dos de trazo más fino
-   (reconocimiento facial y placas) quedaban casi invisibles.
-
-   Se les devuelve el fondo para el que fueron hechas: un disco oscuro justo
-   detrás. Encaja sin recortes porque los iconos ya son circulares y llegan al
-   borde del lienzo. */
-:root[data-theme="light"] .nav-icon {
-    background: #0f172a;
-    border-radius: 50%;
 }
 
 /* El mismo icono encabezando la ventana de cada función, donde antes había un

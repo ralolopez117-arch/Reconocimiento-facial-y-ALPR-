@@ -37,10 +37,10 @@
                  alt="" width="28" height="28">
             <h1 style="font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Centro de Monitoreo Inteligente</h1>
             <!-- Compact icon-only buttons for FR and ALPR -->
-            <button id="open-fr-btn" class="btn-secondary" title="Reconocimiento Facial"><img class="nav-icon" src="{{ url_for('static', filename='img/nav-reconocimiento-facial.png') }}" alt="" width="28" height="28"><span class="nav-label">Reconocimiento Facial</span></button>
-            <button id="open-alpr-btn" class="btn-secondary" title="Placas (ALPR)"><img class="nav-icon" src="{{ url_for('static', filename='img/nav-alpr.png') }}" alt="" width="28" height="28"><span class="nav-label">Placas (ALPR)</span></button>
-            <button id="open-playback-btn" class="btn-secondary perm-view-recordings" title="Grabaciones"><img class="nav-icon" src="{{ url_for('static', filename='img/nav-grabaciones.png') }}" alt="" width="28" height="28"><span class="nav-label">Grabaciones</span></button>
-            <button id="open-settings-btn" class="btn-secondary" title="Configuración"><img class="nav-icon" src="{{ url_for('static', filename='img/nav-configuracion.png') }}" alt="" width="28" height="28"><span class="nav-label">Configuración</span></button>
+            <button id="open-fr-btn" class="btn-secondary" title="Reconocimiento Facial"><span class="nav-icon" data-icono="reconocimiento-facial"></span><span class="nav-label">Reconocimiento Facial</span></button>
+            <button id="open-alpr-btn" class="btn-secondary" title="Placas (ALPR)"><span class="nav-icon" data-icono="alpr"></span><span class="nav-label">Placas (ALPR)</span></button>
+            <button id="open-playback-btn" class="btn-secondary perm-view-recordings" title="Grabaciones"><span class="nav-icon" data-icono="grabaciones"></span><span class="nav-label">Grabaciones</span></button>
+            <button id="open-settings-btn" class="btn-secondary" title="Configuración"><span class="nav-icon" data-icono="configuracion"></span><span class="nav-label">Configuración</span></button>
             <!-- Layout selector + clear button -->
             <div style="display:flex; align-items:center; gap:5px; background: rgba(0,0,0,0.25); padding: 4px 6px; border-radius: 8px; border: 1px solid var(--border-color); flex-shrink: 0;">
                 <button class="layout-btn" data-layout="1" title="1 Cámara">
@@ -132,7 +132,7 @@
     <div class="modal-overlay" id="alpr-modal-overlay">
         <div class="modal alpr-modal">
             <div class="alpr-header">
-                <h3><img class="nav-icon titulo-icono" src="{{ url_for('static', filename='img/nav-alpr.png') }}" alt="" width="28" height="28">Panel de Placas (ALPR)</h3>
+                <h3><span class="nav-icon titulo-icono" data-icono="alpr"></span>Panel de Placas (ALPR)</h3>
                 <button id="alpr-close" class="btn-icon">×</button>
             </div>
 
@@ -228,7 +228,7 @@
     <div class="modal-overlay" id="fr-modal-overlay">
         <div class="modal alpr-modal">
             <div class="alpr-header">
-                <h3><img class="nav-icon titulo-icono" src="{{ url_for('static', filename='img/nav-reconocimiento-facial.png') }}" alt="" width="28" height="28">Reconocimiento Facial</h3>
+                <h3><span class="nav-icon titulo-icono" data-icono="reconocimiento-facial"></span>Reconocimiento Facial</h3>
                 <button id="fr-close" class="btn-icon">×</button>
             </div>
 
@@ -315,7 +315,7 @@
         <div class="modal playback-modal">
 
             <div class="alpr-header">
-                <h3><img class="nav-icon titulo-icono" src="{{ url_for('static', filename='img/nav-grabaciones.png') }}" alt="" width="28" height="28">Grabaciones</h3>
+                <h3><span class="nav-icon titulo-icono" data-icono="grabaciones"></span>Grabaciones</h3>
                 <div class="playback-header-tools">
                     <label for="playback-date" class="playback-date-label">Fecha</label>
                     <input type="date" id="playback-date" class="playback-date">
@@ -475,7 +475,7 @@
     <div class="modal-overlay" id="settings-modal-overlay">
         <div class="modal alpr-modal">
             <div class="alpr-header">
-                <h3><img class="nav-icon titulo-icono" src="{{ url_for('static', filename='img/nav-configuracion.png') }}" alt="" width="28" height="28">Configuración</h3>
+                <h3><span class="nav-icon titulo-icono" data-icono="configuracion"></span>Configuración</h3>
                 <button id="settings-close" class="btn-icon">×</button>
             </div>
 
