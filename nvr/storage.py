@@ -285,6 +285,25 @@ def apply_retention(camera_id: str, retention_days: int):
     return borrados, liberados
 
 
+def delete_camera_recordings(camera_id: str):
+    """
+    Borra todas las grabaciones de una cámara.
+
+    Es una acción explícita del administrador, no parte del mantenimiento: dejar
+    de grabar una cámara no borra lo ya grabado, y recuperar material es
+    justamente para lo que sirve un NVR.
+
+    Returns:
+        (días_borrados, bytes_liberados)
+    """
+    dias = list_days(camera_id)
+    borrados, liberados = 0, 0
+    for info in dias:
+        liberados += _borrar_dia(camera_id, info["day"])
+        borrados += 1
+    return borrados, liberados
+
+
 def enforce_global_limit(max_total_gb: float):
     """
     Respeta el tope global de disco borrando el día más antiguo de todos.
@@ -292,6 +311,10 @@ def enforce_global_limit(max_total_gb: float):
     Sin este límite, configurar una retención larga en varias cámaras llenaría
     la unidad y la grabación se detendría sin aviso. Se recorta la cámara que
     tenga el día más antiguo, para repartir el sacrificio de forma natural.
+
+    A diferencia de la retención por días, aquí sí entran las cámaras que ya no
+    graban: es el último recurso antes de que el disco se llene y las que sí
+    están grabando se queden sin sitio.
 
     Returns:
         (días_borrados, bytes_liberados)

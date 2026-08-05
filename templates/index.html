@@ -9,8 +9,11 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body class="{{ 'is-admin' if is_admin else 'is-operator' }}"
-      data-role="{{ user.role }}" data-username="{{ user.username }}">
+<body class="{{ 'is-admin' if is_admin else 'is-operator' }}
+             {{ 'can-view-recordings' if 'recordings.view' in permissions else '' }}
+             {{ 'can-export-recordings' if 'recordings.export' in permissions else '' }}"
+      data-role="{{ user.role }}" data-username="{{ user.username }}"
+      data-permissions="{{ permissions|join(',') }}">
 
     <!-- Sidebar / Camera Panel -->
     <aside class="sidebar" id="sidebar">
@@ -36,7 +39,7 @@
             <!-- Compact icon-only buttons for FR and ALPR -->
             <button id="open-fr-btn" class="btn-secondary" title="Reconocimiento Facial" style="padding: 7px 10px; white-space: nowrap;">👤 <span class="nav-label">Reconocimiento Facial</span></button>
             <button id="open-alpr-btn" class="btn-secondary" title="Placas (ALPR)" style="padding: 7px 10px; white-space: nowrap;">🚗 <span class="nav-label">Placas (ALPR)</span></button>
-            <button id="open-playback-btn" class="btn-secondary" title="Grabaciones" style="padding: 7px 10px; white-space: nowrap;">⏱ <span class="nav-label">Grabaciones</span></button>
+            <button id="open-playback-btn" class="btn-secondary perm-view-recordings" title="Grabaciones" style="padding: 7px 10px; white-space: nowrap;">⏱ <span class="nav-label">Grabaciones</span></button>
             <button id="open-settings-btn" class="btn-secondary" title="Configuración" style="padding: 7px 10px; white-space: nowrap;">⚙ <span class="nav-label">Configuración</span></button>
             <!-- Layout selector + clear button -->
             <div style="display:flex; align-items:center; gap:5px; background: rgba(0,0,0,0.25); padding: 4px 6px; border-radius: 8px; border: 1px solid var(--border-color); flex-shrink: 0;">
@@ -389,7 +392,7 @@
                             title="Marcar un tramo arrastrando sobre la línea de tiempo">
                         ✂ Marcar recorte</button>
                     <span id="pb-selection-info" class="pb-selection-info"></span>
-                    <button id="pb-export" class="pb-zoom-btn pb-zoom-fit pb-export-btn"
+                    <button id="pb-export" class="pb-zoom-btn pb-zoom-fit pb-export-btn perm-export-recordings"
                             title="Exportar el tramo marcado a MP4" disabled>Exportar</button>
 
                     <span class="pb-zoom-hint">Rueda del ratón para ampliar</span>
@@ -634,6 +637,7 @@
                             <tr>
                                 <th>Usuario</th>
                                 <th>Rol</th>
+                                <th title="Acceso al material grabado">Grabaciones</th>
                                 <th>Creado</th>
                                 <th style="text-align:right;">Acciones</th>
                             </tr>
@@ -697,6 +701,9 @@
                     <strong>Qué cámaras se graban y cuántos días se conservan.</strong>
                     Al superar los días indicados no se borra todo: se elimina el día más
                     antiguo, de modo que lo nuevo va sustituyendo a lo viejo.
+                    Desmarcar una cámara solo detiene la grabación; lo ya grabado se
+                    conserva y se puede seguir consultando. Para eliminarlo está la
+                    papelera de cada fila.
                 </p>
 
                 <div class="alpr-table-container">
@@ -707,6 +714,8 @@
                                 <th>Cámara</th>
                                 <th style="width:110px;">Días</th>
                                 <th>Almacenado</th>
+                                <th style="width:60px; text-align:right;"
+                                    title="Borrar las grabaciones de la cámara">Borrar</th>
                             </tr>
                         </thead>
                         <tbody id="nvr-cameras-body">
@@ -798,6 +807,6 @@
     <!-- Audio element for alert -->
     <audio id="alert-sound" src="{{ url_for('static', filename='alert.ogg') }}" preload="auto"></audio>
 
-    <script src="{{ url_for('static', filename='app.js') }}"></script>
+    <script src="{{ url_for('static', filename='app.js', v=2) }}"></script>
 </body>
 </html>

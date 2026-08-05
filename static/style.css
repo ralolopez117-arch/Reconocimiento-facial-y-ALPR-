@@ -229,6 +229,15 @@ body {
     flex: 1;
     display: flex;
     flex-direction: column;
+    min-width: 0;
+
+    /* Los elementos de la barra superior se adaptan al ancho que queda libre,
+       no al de la ventana. Antes se usaba una consulta @media, que solo mira el
+       viewport: con la lista de cámaras abierta se perdían 300 px que la
+       consulta no veía, los botones seguían con su texto completo y el nombre
+       de usuario quedaba cortado contra el borde derecho. */
+    container-type: inline-size;
+    container-name: contenido;
 }
 
 .top-nav {
@@ -251,9 +260,29 @@ body {
     font-size: 1rem;
 }
 
-/* Hide nav labels on smaller screens */
-@media (max-width: 1200px) {
+/* La barra superior se va simplificando conforme le falta sitio, en este
+   orden: primero el texto de los botones, que conservan su icono y su
+   tooltip; luego el título, que no aporta nada operativo; y por último el
+   rol del usuario. El nombre y el botón de salir no se ocultan nunca. */
+@container contenido (max-width: 1250px) {
     .nav-label { display: none; }
+}
+
+@container contenido (max-width: 780px) {
+    .top-nav h1 { display: none; }
+}
+
+@container contenido (max-width: 620px) {
+    .user-chip .user-role { display: none; }
+    .nav-logo { display: none; }
+}
+
+/* Reserva para navegadores sin consultas de contenedor: al menos reaccionan
+   al tamaño de la ventana, como se venía haciendo. */
+@supports not (container-type: inline-size) {
+    @media (max-width: 1200px) {
+        .nav-label { display: none; }
+    }
 }
 
 /* Clear button hover - red tint */
@@ -710,6 +739,19 @@ body {
 }
 
 body.is-admin .admin-only {
+    display: revert !important;
+}
+
+/* Igual que .admin-only, pero según los permisos de la cuenta en vez del rol.
+   Ocultar el botón es solo comodidad: el servidor rechaza igualmente la
+   petición de quien no tenga el permiso. */
+.perm-view-recordings,
+.perm-export-recordings {
+    display: none !important;
+}
+
+body.can-view-recordings .perm-view-recordings,
+body.can-export-recordings .perm-export-recordings {
     display: revert !important;
 }
 
@@ -1857,3 +1899,54 @@ body.is-admin .admin-only {
     100% { transform: scale(1); opacity: 1; }
 }
 
+
+/* ---- Avisos emergentes ---- */
+
+/* El contenedor vive suelto dentro del <body>, que es un flex en fila. Sin
+   posicionarlo se convertía en una columna más junto a la barra lateral y el
+   contenido: empujaba toda la interfaz hacia la izquierda y el texto del aviso
+   aparecía crudo contra el borde derecho de la ventana. */
+.toast-container {
+    position: fixed;
+    top: 70px;
+    right: 20px;
+    z-index: 3000;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: flex-end;
+
+    /* Que no intercepte clics en la zona que ocupa cuando está vacío */
+    pointer-events: none;
+}
+
+.toast {
+    background: var(--panel-bg);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+    border-left: 3px solid var(--primary);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 0.9rem;
+    max-width: 340px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    backdrop-filter: blur(10px);
+    pointer-events: auto;
+    animation: toast-entra 0.25s ease;
+}
+
+@keyframes toast-entra {
+    from { opacity: 0; transform: translateX(20px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+
+/* app.js espera el final de esta animación para quitar el aviso del DOM. Sin
+   una animación real el evento no llega nunca y los avisos se acumulan. */
+.toast.fade-out {
+    animation: toast-sale 0.3s ease forwards;
+}
+
+@keyframes toast-sale {
+    from { opacity: 1; transform: translateX(0); }
+    to   { opacity: 0; transform: translateX(20px); }
+}

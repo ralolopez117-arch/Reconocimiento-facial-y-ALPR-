@@ -8,7 +8,7 @@ from config_manager import (load_config, save_config, get_display_settings,
                             save_alpr_settings, get_security_settings,
                             save_security_settings)
 import auth
-from auth import login_required, admin_required
+from auth import login_required, admin_required, permission_required
 import audit
 from plate_format import PLATE_PATTERNS, list_formats
 from plate_types import (ANY_TYPE, list_types, is_known_type, describe_mismatch,
@@ -154,6 +154,7 @@ def index():
     # haya un destello del tema anterior mientras carga el JavaScript.
     prefs = auth.get_preferences(session['user_id'])
     return render_template('index.html', user=user, is_admin=auth.is_admin(),
+                           permissions=sorted(auth.current_permissions()),
                            theme=prefs['theme'])
 
 # ---------------------------------------------------------------------------
@@ -282,8 +283,24 @@ def update_nvr_cameras():
               details={'camaras': ', '.join(activas) or 'ninguna'})
     return jsonify({'status': 'success'})
 
+@app.route('/api/nvr/cameras/<camera_id>/recordings', methods=['DELETE'])
+@admin_required
+def delete_nvr_recordings(camera_id):
+    """Borra todo el material grabado de una cámara. No toca su configuración."""
+    nombre = next((c['name'] for c in load_config().get('cameras', [])
+                   if c['id'] == camera_id), camera_id)
+    try:
+        r = nvr_client.delete_camera_recordings(camera_id)
+    except nvr_client.NvrError as e:
+        return jsonify({'status': 'error', 'message': e.mensaje}), 502
+
+    audit.log(audit.NVR_RECORDINGS_DELETED, target=nombre,
+              details={'dias': r.get('days_deleted', 0),
+                       'bytes_liberados': r.get('bytes_freed', 0)})
+    return jsonify(r)
+
 @app.route('/api/nvr/recordings/days', methods=['GET'])
-@login_required
+@permission_required(auth.PERM_VIEW_RECORDINGS)
 def nvr_recording_days():
     try:
         return jsonify(nvr_client.recording_days(request.args.get('camera_id', '')))
@@ -291,7 +308,7 @@ def nvr_recording_days():
         return jsonify({'status': 'error', 'message': e.mensaje}), 502
 
 @app.route('/api/nvr/recordings/segments', methods=['GET'])
-@login_required
+@permission_required(auth.PERM_VIEW_RECORDINGS)
 def nvr_recording_segments():
     try:
         return jsonify(nvr_client.recording_segments(
@@ -303,7 +320,7 @@ def nvr_recording_segments():
         return jsonify({'status': 'error', 'message': e.mensaje}), 502
 
 @app.route('/api/nvr/recordings/at', methods=['GET'])
-@login_required
+@permission_required(auth.PERM_VIEW_RECORDINGS)
 def nvr_recording_at():
     try:
         return jsonify(nvr_client.recording_at(
@@ -312,7 +329,7 @@ def nvr_recording_at():
         return jsonify({'status': 'error', 'message': e.mensaje}), 502
 
 @app.route('/api/nvr/segment/<int:segment_id>', methods=['GET'])
-@login_required
+@permission_required(auth.PERM_VIEW_RECORDINGS)
 def nvr_segment(segment_id):
     """
     Reenvía un segmento de vídeo desde el NVR al navegador.
@@ -343,7 +360,7 @@ def nvr_segment(segment_id):
                     headers=cabeceras, direct_passthrough=True)
 
 @app.route('/api/nvr/export', methods=['POST'])
-@login_required
+@permission_required(auth.PERM_EXPORT_RECORDINGS)
 def nvr_export_create():
     """Encola una exportación de vídeo y devuelve el trabajo."""
     datos = request.json or {}
@@ -360,7 +377,7 @@ def nvr_export_create():
     return jsonify(r)
 
 @app.route('/api/nvr/export/<job_id>', methods=['GET'])
-@login_required
+@permission_required(auth.PERM_EXPORT_RECORDINGS)
 def nvr_export_status(job_id):
     try:
         return jsonify(nvr_client.export_status(job_id))
@@ -368,7 +385,7 @@ def nvr_export_status(job_id):
         return jsonify({'status': 'error', 'message': e.mensaje}), 502
 
 @app.route('/api/nvr/export/<job_id>/download', methods=['GET'])
-@login_required
+@permission_required(auth.PERM_EXPORT_RECORDINGS)
 def nvr_export_download(job_id):
     """Reenvía el archivo exportado al navegador, por trozos."""
     try:
@@ -456,12 +473,20 @@ def get_audit_log():
         'actions': audit.list_actions(),
     })
 
+def _describir_permisos(permisos):
+    """Permisos en texto legible para la auditoría, no con sus claves internas."""
+    concedidos = [auth.PERMISSION_LABELS[p] for p in auth.VALID_PERMISSIONS
+                  if p in set(permisos or ())]
+    return ', '.join(concedidos) or 'ninguno'
+
 @app.route('/api/users', methods=['GET'])
 @admin_required
 def get_users():
     return jsonify({
         'users': auth.list_users(),
         'roles': [{'key': r, 'label': auth.ROLE_LABELS[r]} for r in auth.VALID_ROLES],
+        'permissions': [{'key': p, 'label': auth.PERMISSION_LABELS[p]}
+                        for p in auth.VALID_PERMISSIONS],
         'current_user_id': session.get('user_id'),
     })
 
@@ -469,13 +494,18 @@ def get_users():
 @admin_required
 def add_user():
     data = request.json or {}
+    permisos = data.get('permissions')
     user_id, error = auth.create_user(data.get('username', ''),
                                       data.get('password', ''),
-                                      data.get('role', auth.ROLE_OPERATOR))
+                                      data.get('role', auth.ROLE_OPERATOR),
+                                      permissions=permisos)
     if error:
         return jsonify({'status': 'error', 'message': error}), 400
+    concedidos = auth.parse_permissions(auth.format_permissions(
+        permisos if permisos is not None else auth.DEFAULT_OPERATOR_PERMISSIONS))
     audit.log(audit.USER_ADDED, target=data.get('username', ''),
-              details={'rol': data.get('role', auth.ROLE_OPERATOR)})
+              details={'rol': data.get('role', auth.ROLE_OPERATOR),
+                       'permisos': _describir_permisos(concedidos)})
     return jsonify({'status': 'success', 'id': user_id})
 
 @app.route('/api/users/<int:user_id>', methods=['PUT'])
@@ -483,7 +513,8 @@ def add_user():
 def edit_user(user_id):
     data = request.json or {}
     error = auth.update_user(user_id, role=data.get('role'),
-                             password=data.get('password'))
+                             password=data.get('password'),
+                             permissions=data.get('permissions'))
     if error:
         return jsonify({'status': 'error', 'message': error}), 400
 
@@ -494,7 +525,10 @@ def edit_user(user_id):
     objetivo = auth.get_user(user_id) or {}
     audit.log(audit.USER_EDITED, target=objetivo.get('username', user_id),
               details={'rol': data.get('role'),
-                       'contrasena_cambiada': bool(data.get('password'))})
+                       'contrasena_cambiada': bool(data.get('password')),
+                       'permisos': (_describir_permisos(data['permissions'])
+                                    if data.get('permissions') is not None
+                                    else None)})
     return jsonify({'status': 'success'})
 
 @app.route('/api/users/<int:user_id>', methods=['DELETE'])
@@ -992,13 +1026,20 @@ def get_latest_plate_alerts():
 def video_feed(cam_id):
     config = load_config()
     source = None
+    cam_name = cam_id
     for cam in config.get("cameras", []):
         if cam["id"] == cam_id:
             source = cam["source"]
+            cam_name = cam.get("name", cam_id)
             break
     
     if source is None:
         return "Camera not found", 404
+
+    # Deja constancia de quién abrió el stream. Agrupa por sesión y cámara:
+    # el navegador pide esta URL de nuevo en cada recarga, cambio de
+    # distribución o reconexión, y anotarlas todas llenaba el registro.
+    audit.log_stream_start(cam_id, cam_name)
 
     # El identificador se lee aquí, dentro del contexto de la petición: el
     # generador se consume después, cuando ya no hay acceso a `session`.

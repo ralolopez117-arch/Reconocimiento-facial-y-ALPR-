@@ -1465,24 +1465,41 @@ async function saveSecuritySettings() {
 // ---- Gestión de usuarios (solo administrador) ----
 
 let currentUserId = null;
+let usuariosCargados = [];
 
 async function fetchUsers() {
     const res = await fetch('/api/users');
     if (!res.ok) return;
     const data = await res.json();
     currentUserId = data.current_user_id;
-    renderUsers(data.users, data.roles);
+    usuariosCargados = data.users || [];
+    renderUsers(data.users, data.roles, data.permissions || []);
 }
 
-function renderUsers(users, roles) {
+function renderUsers(users, roles, permisos) {
     const tbody = document.getElementById('users-table-body');
     tbody.innerHTML = '';
 
     users.forEach(u => {
         const esUnoMismo = u.id === currentUserId;
+        const esAdmin = u.role === 'admin';
         const opciones = roles.map(r =>
             `<option value="${r.key}"${r.key === u.role ? ' selected' : ''}>${r.label}</option>`
         ).join('');
+
+        // El administrador los tiene todos por definición: se muestran marcados
+        // y bloqueados en vez de ocultarlos, para que se vea qué alcance tiene
+        // la cuenta sin dar a entender que se le puede recortar.
+        const concedidos = new Set(u.permissions || []);
+        const casillas = permisos.map(p => `
+            <label style="display:flex; align-items:center; gap:6px; font-size:0.85em;
+                          ${esAdmin ? 'opacity:0.55;' : 'cursor:pointer;'}"
+                   title="${esAdmin ? 'El administrador tiene todos los permisos' : p.label}">
+                <input type="checkbox" ${concedidos.has(p.key) ? 'checked' : ''}
+                       ${esAdmin ? 'disabled' : ''}
+                       onchange="changeUserPermission(${u.id}, '${p.key}', this.checked)">
+                <span>${p.label}</span>
+            </label>`).join('');
 
         const tr = document.createElement('tr');
         tr.innerHTML = `
@@ -1494,6 +1511,7 @@ function renderUsers(users, roles) {
                     ${opciones}
                 </select>
             </td>
+            <td><div style="display:flex; flex-direction:column; gap:4px;">${casillas}</div></td>
             <td style="color:var(--text-muted); font-size:0.85em;">${(u.created_at || '').split('.')[0]}</td>
             <td style="text-align:right; white-space:nowrap;">
                 <button class="btn-edit" title="Cambiar contraseña"
@@ -1525,6 +1543,31 @@ async function changeUserRole(id, role) {
         return;
     }
     fetchUsers();
+}
+
+async function changeUserPermission(id, permiso, concedido) {
+    const usuario = usuariosCargados.find(u => u.id === id);
+    if (!usuario) return;
+
+    // El servidor espera la lista completa, no el cambio suelto: así una
+    // petición define el estado final y no depende de en qué orden lleguen
+    // varios clics seguidos.
+    const permisos = new Set(usuario.permissions || []);
+    concedido ? permisos.add(permiso) : permisos.delete(permiso);
+
+    const res = await fetch(`/api/users/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ permissions: [...permisos] })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        alert(data.message || 'No se pudo cambiar el permiso.');
+        fetchUsers();
+        return;
+    }
+    usuario.permissions = [...permisos];
+    showToast(`Permisos de ${usuario.username} actualizados`);
 }
 
 async function resetUserPassword(id, username) {
@@ -1839,7 +1882,7 @@ function renderNvrCameras(disponible, mensaje) {
     tbody.innerHTML = '';
 
     if (!nvrCamaras.length) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">'
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">'
                         + 'No hay cámaras registradas</td></tr>';
         return;
     }
@@ -1865,6 +1908,11 @@ function renderNvrCameras(disponible, mensaje) {
                               color:var(--text-color);">
             </td>
             <td style="color:var(--text-muted); font-size:0.9em;">${almacenado}</td>
+            <td style="text-align:right;">
+                <button class="btn-delete" title="Borrar las grabaciones de esta cámara"
+                        onclick="borrarGrabaciones('${c.camera_id}', ${JSON.stringify(c.name).replace(/"/g, '&quot;')})"
+                        ${c.days_recorded ? '' : 'disabled style="opacity:0.35; cursor:default;"'}>🗑</button>
+            </td>
         `;
         tbody.appendChild(tr);
     });
@@ -1876,6 +1924,38 @@ function renderNvrCameras(disponible, mensaje) {
         msg.style.color = '#f87171';
         msg.classList.add('visible');
     }
+}
+
+async function borrarGrabaciones(cameraId, nombre) {
+    const cam = nvrCamaras.find(c => c.camera_id === cameraId);
+    const cuanto = cam ? `${cam.days_recorded} día(s), ${formatearBytes(cam.bytes)}` : '';
+
+    if (!confirm(`Se borrarán TODAS las grabaciones de "${nombre}"`
+                 + (cuanto ? ` (${cuanto})` : '') + '.\n\n'
+                 + 'La cámara sigue configurada y, si estaba grabando, continuará '
+                 + 'haciéndolo. Esta acción no se puede deshacer.')) return;
+
+    const msg = document.getElementById('nvr-cameras-msg');
+    msg.textContent = `Borrando las grabaciones de ${nombre}…`;
+    msg.style.color = 'var(--text-muted)';
+    msg.classList.add('visible');
+
+    const res = await fetch(`/api/nvr/cameras/${encodeURIComponent(cameraId)}/recordings`,
+                            { method: 'DELETE' });
+    const d = await res.json().catch(() => ({}));
+
+    if (res.ok) {
+        msg.textContent = `✔ Borradas las grabaciones de ${nombre}`
+                        + ` (${d.days_deleted || 0} día(s), ${formatearBytes(d.bytes_freed || 0)} liberados).`;
+        msg.style.color = '#4ade80';
+        fetchNvrCameras();
+        fetchNvrStatus();
+    } else {
+        msg.textContent = `✖ ${d.message || 'No se pudo borrar'}`;
+        msg.style.color = '#f87171';
+    }
+    clearTimeout(borrarGrabaciones._t);
+    borrarGrabaciones._t = setTimeout(() => msg.classList.remove('visible'), 6000);
 }
 
 async function guardarNvrCameras() {
@@ -2677,6 +2757,21 @@ async function pbIrAInstante(momento) {
         };
         if (acciones[e.key]) { e.preventDefault(); acciones[e.key](); }
     });
+
+    // Refresco periódico de la línea de tiempo para mostrar grabaciones nuevas
+    setInterval(async () => {
+        if (!overlay.classList.contains('active') || !PB.camara || !PB.fecha) return;
+        try {
+            const url = `/api/nvr/recordings/segments?camera_id=${
+                encodeURIComponent(PB.camara.camera_id)}&day=${encodeURIComponent(PB.fecha)}`;
+            const d = await (await fetch(url)).json();
+            if (d.segments && PB.segmentos && d.segments.length > PB.segmentos.length) {
+                PB.segmentos = d.segments;
+                PB.tramos = d.ranges || [];
+                pbDibujarLineaDeTiempo();
+            }
+        } catch (e) { /* silencioso */ }
+    }, 5000);
 })();
 
 function pbActualizarCabezalTemporal(clientX) {
@@ -2709,7 +2804,7 @@ function pbDibujarSeleccion() {
     if (!PB.seleccion.activa || PB.seleccion.desde === null || PB.seleccion.hasta === null) {
         el.classList.remove('visible');
         info.textContent = '';
-        btn.disabled = true;
+        btn.disabled = !PB.camara;
         return;
     }
 
@@ -2731,7 +2826,7 @@ function pbDibujarSeleccion() {
     const dur = b - a;
     info.textContent = `${pbSegundosATexto(a)} → ${pbSegundosATexto(b)} `
                      + `(${dur >= 60 ? Math.round(dur / 60) + ' min' : Math.round(dur) + ' s'})`;
-    btn.disabled = !PB.camara || dur < 1;
+    btn.disabled = !PB.camara;
 }
 
 function pbAlternarModoSeleccion() {
@@ -2755,8 +2850,15 @@ function pbAlternarModoSeleccion() {
 function pbAbrirExportacion() {
     if (!PB.camara) { showToast('Primero elige una cámara.'); return; }
 
-    const a = Math.min(PB.seleccion.desde, PB.seleccion.hasta);
-    const b = Math.max(PB.seleccion.desde, PB.seleccion.hasta);
+    let a, b;
+    if (PB.seleccion.desde !== null && PB.seleccion.hasta !== null) {
+        a = Math.min(PB.seleccion.desde, PB.seleccion.hasta);
+        b = Math.max(PB.seleccion.desde, PB.seleccion.hasta);
+    } else {
+        const cur = pbInstanteActual();
+        b = cur ? pbSegundosDesdeMedianoche(cur) : pbSegundosDesdeMedianoche(new Date());
+        a = Math.max(0, b - 300);
+    }
 
     // Se rellenan también los campos manuales: la selección de la línea es
     // aproximada al píxel y así se puede ajustar al segundo.

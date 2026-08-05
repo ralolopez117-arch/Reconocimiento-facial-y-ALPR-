@@ -218,9 +218,18 @@ class RecorderManager:
             camaras = config.get("cameras", {})
 
             # Se indexan también las cámaras deshabilitadas: sus grabaciones
-            # antiguas siguen ahí y deben poder consultarse y caducar.
+            # antiguas siguen ahí y deben poder consultarse.
+            #
+            # Pero la retención solo se aplica a las que están grabando. En una
+            # cámara parada no entra material nuevo, así que la rotación no
+            # sustituiría lo viejo por lo reciente: se limitaría a vaciarla día
+            # a día hasta no dejar nada. Quitar la marca de grabación debe
+            # apagar la tarea, no condenar lo ya guardado; para borrarlo está el
+            # botón correspondiente en la configuración.
             for cid, info in camaras.items():
                 storage.scan_camera(cid)
+                if not info.get("enabled"):
+                    continue
                 dias = int(info.get("retention_days",
                                     config.get("retention_days", 3)) or 0)
                 storage.apply_retention(cid, dias)

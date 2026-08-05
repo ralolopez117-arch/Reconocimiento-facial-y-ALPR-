@@ -1,13 +1,19 @@
 """
 auth.py
 -------
-Usuarios, roles y control de sesión.
+Usuarios, roles, permisos y control de sesión.
 
 Roles
 ─────
     admin      Acceso total: cámaras, configuración, usuarios y borrados.
     operador   Solo visualización y alta de registros. No puede editar ni
                eliminar nada, ni cambiar el país ni el modo de detección.
+
+Permisos
+────────
+El rol decide qué se puede tocar de la configuración; los permisos afinan, para
+cada operador por separado, el acceso al material grabado: ver grabaciones y
+exportar vídeo se conceden por cuenta. El administrador los tiene todos.
 
 Caducidad de sesión
 ───────────────────
@@ -42,6 +48,60 @@ ROLE_LABELS = {
     ROLE_ADMIN: "Administrador",
     ROLE_OPERATOR: "Operador",
 }
+
+# ---------------------------------------------------------------------------
+# Permisos por usuario
+#
+# El rol define lo que se puede hacer con la configuración del sistema; estos
+# permisos afinan, operador por operador, el acceso al material grabado. Son
+# dos cosas distintas: alguien puede necesitar vigilar cámaras en directo sin
+# tener por qué rebobinar lo de ayer, y ver una grabación no es lo mismo que
+# poder llevarse una copia en un archivo.
+#
+# El administrador los tiene todos por definición y no se le pueden quitar:
+# quien gestiona el sistema puede devolvérselos en cualquier momento, así que
+# restringirle solo daría una falsa sensación de control.
+# ---------------------------------------------------------------------------
+PERM_VIEW_RECORDINGS = "recordings.view"
+PERM_EXPORT_RECORDINGS = "recordings.export"
+
+PERMISSION_LABELS = {
+    PERM_VIEW_RECORDINGS: "Ver grabaciones",
+    PERM_EXPORT_RECORDINGS: "Exportar vídeo",
+}
+VALID_PERMISSIONS = tuple(PERMISSION_LABELS)
+
+# Un operador nuevo puede consultar grabaciones, pero no sacarlas del sistema.
+# Exportar produce un archivo que ya vive fuera de la aplicación, donde ni la
+# retención ni la auditoría alcanzan, así que se concede a mano.
+DEFAULT_OPERATOR_PERMISSIONS = (PERM_VIEW_RECORDINGS,)
+
+
+def parse_permissions(valor) -> set:
+    """
+    Convierte la columna `permissions` en un conjunto.
+
+    Un valor nulo corresponde a una fila anterior a la migración y se
+    interpreta como "todos": esas cuentas venían de una versión sin control de
+    permisos, donde nadie tenía restringido nada.
+    """
+    if valor is None:
+        return set(VALID_PERMISSIONS)
+    return {p for p in str(valor).split(",") if p in VALID_PERMISSIONS}
+
+
+def format_permissions(permisos) -> str:
+    """Serializa un conjunto de permisos para guardarlo, descartando los desconocidos."""
+    return ",".join(p for p in VALID_PERMISSIONS if p in set(permisos or ()))
+
+
+def user_permissions(user) -> set:
+    """Permisos efectivos de un usuario, contando que el administrador los tiene todos."""
+    if not user:
+        return set()
+    if user.get("role") == ROLE_ADMIN:
+        return set(VALID_PERMISSIONS)
+    return parse_permissions(user.get("permissions"))
 
 # ---------------------------------------------------------------------------
 # Hash de contraseñas
@@ -128,6 +188,20 @@ def init_users():
         )
     ''')
     conn.commit()
+
+    # Los permisos se añadieron después, así que la columna puede faltar en
+    # bases de datos ya existentes.
+    cursor.execute("PRAGMA table_info(users)")
+    columnas = {c["name"] for c in cursor.fetchall()}
+    if "permissions" not in columnas:
+        cursor.execute("ALTER TABLE users ADD COLUMN permissions TEXT")
+        # A los operadores que ya existían se les conceden todos los permisos.
+        # Hasta ahora podían ver y exportar grabaciones porque no había nada
+        # que se lo impidiese; estrenar el control quitándoles acceso de golpe
+        # rompería su trabajo sin que nadie lo hubiera decidido.
+        cursor.execute("UPDATE users SET permissions = ?",
+                       (format_permissions(VALID_PERMISSIONS),))
+        conn.commit()
 
     cursor.execute("SELECT COUNT(*) AS n FROM users")
     if cursor.fetchone()["n"] == 0:
@@ -242,16 +316,29 @@ def list_users():
     """Todos los usuarios, sin exponer los hashes de contraseña."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, username, role, created_at FROM users "
+    cursor.execute("SELECT id, username, role, permissions, created_at FROM users "
                    "ORDER BY role, username")
     rows = cursor.fetchall()
     conn.close()
-    return [dict(row) for row in rows]
+
+    usuarios = []
+    for row in rows:
+        u = dict(row)
+        # Se devuelven los permisos ya resueltos: la interfaz marca las
+        # casillas del administrador sin tener que replicar la regla de que
+        # los tiene todos.
+        u["permissions"] = sorted(user_permissions(u))
+        usuarios.append(u)
+    return usuarios
 
 
-def create_user(username: str, password: str, role: str):
+def create_user(username: str, password: str, role: str, permissions=None):
     """
     Crea un usuario.
+
+    Args:
+        permissions: iterable de permisos; si es None se usan los de partida
+                     para operadores.
 
     Returns:
         (user_id, error) — uno de los dos siempre es None.
@@ -266,11 +353,15 @@ def create_user(username: str, password: str, role: str):
     if get_user_by_name(username):
         return None, f'El usuario "{username}" ya existe'
 
+    if permissions is None:
+        permissions = DEFAULT_OPERATOR_PERMISSIONS
+
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-        (username, hash_password(password), role)
+        "INSERT INTO users (username, password_hash, role, permissions) "
+        "VALUES (?, ?, ?, ?)",
+        (username, hash_password(password), role, format_permissions(permissions))
     )
     user_id = cursor.lastrowid
     conn.commit()
@@ -278,9 +369,13 @@ def create_user(username: str, password: str, role: str):
     return user_id, None
 
 
-def update_user(user_id: int, role: str = None, password: str = None):
+def update_user(user_id: int, role: str = None, password: str = None,
+                permissions=None):
     """
-    Cambia el rol o la contraseña de un usuario.
+    Cambia el rol, la contraseña o los permisos de un usuario.
+
+    Cada argumento que llegue como None se deja como estaba, de modo que
+    cambiar solo la contraseña no toca los permisos y viceversa.
 
     Returns:
         error (str) o None si fue bien.
@@ -304,6 +399,9 @@ def update_user(user_id: int, role: str = None, password: str = None):
     if password:
         cursor.execute("UPDATE users SET password_hash = ? WHERE id = ?",
                        (hash_password(password), user_id))
+    if permissions is not None:
+        cursor.execute("UPDATE users SET permissions = ? WHERE id = ?",
+                       (format_permissions(permissions), user_id))
     conn.commit()
     conn.close()
     return None
@@ -402,6 +500,26 @@ def is_admin() -> bool:
     return session.get("role") == ROLE_ADMIN
 
 
+def current_permissions() -> set:
+    """
+    Permisos del usuario conectado, consultados en la base de datos.
+
+    No se guardan en la sesión a propósito. Si el administrador le retira un
+    permiso a alguien que está conectado, el cambio debe surtir efecto en la
+    siguiente petición y no cuando esa persona vuelva a entrar.
+    """
+    if is_admin():
+        return set(VALID_PERMISSIONS)
+    uid = session.get("user_id")
+    if uid is None:
+        return set()
+    return user_permissions(get_user(uid))
+
+
+def has_permission(permiso: str) -> bool:
+    return permiso in current_permissions()
+
+
 def _wants_json() -> bool:
     """
     True si la petición espera JSON en lugar de una redirección.
@@ -442,3 +560,29 @@ def admin_required(view):
             }), 403
         return view(*args, **kwargs)
     return wrapped
+
+
+def permission_required(permiso: str):
+    """
+    Exige sesión iniciada y un permiso concreto.
+
+    Se comprueba en el servidor además de ocultar los botones en la interfaz:
+    esconder un botón no impide llamar a la URL a mano.
+    """
+    def decorador(view):
+        @functools.wraps(view)
+        def wrapped(*args, **kwargs):
+            if current_user() is None:
+                if _wants_json():
+                    return jsonify({"status": "error", "code": "unauthenticated",
+                                    "message": "Sesión no iniciada"}), 401
+                return redirect(url_for("login"))
+            if not has_permission(permiso):
+                etiqueta = PERMISSION_LABELS.get(permiso, permiso)
+                return jsonify({
+                    "status": "error", "code": "forbidden",
+                    "message": f'Su cuenta no tiene el permiso "{etiqueta}"',
+                }), 403
+            return view(*args, **kwargs)
+        return wrapped
+    return decorador

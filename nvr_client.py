@@ -59,15 +59,23 @@ class NvrError(Exception):
         self.codigo = codigo
 
 
-def _request(metodo: str, ruta: str, **kwargs):
+def _request(metodo: str, ruta: str, timeout: float = None, **kwargs):
+    """
+    Llamada al NVR.
+
+    Args:
+        timeout: espera de lectura en segundos para las operaciones que tardan
+                 más de lo normal, como borrar cientos de archivos de disco.
+    """
     url = _base_url()
     if not url:
         raise NvrError("No hay dirección de servidor de grabaciones configurada")
 
+    espera = (TIMEOUT_CONEXION, timeout or TIMEOUT_LECTURA)
     try:
         r = requests.request(
             metodo, f"{url}{ruta}", headers=_headers(),
-            timeout=(TIMEOUT_CONEXION, TIMEOUT_LECTURA), **kwargs)
+            timeout=espera, **kwargs)
     except requests.exceptions.ConnectTimeout:
         raise NvrError(f"El servidor de grabaciones no responde en {url}")
     except requests.exceptions.ConnectionError:
@@ -80,10 +88,13 @@ def _request(metodo: str, ruta: str, **kwargs):
         raise NvrError("La clave de acceso no es correcta", 401)
     if r.status_code >= 400:
         detalle = ""
-        try:
-            detalle = r.json().get("message", "")
-        except Exception:
-            detalle = r.text[:120]
+        if r.status_code == 404:
+            detalle = "La ruta o cámara no existe en el servidor de grabaciones (404)."
+        else:
+            try:
+                detalle = r.json().get("message", "")
+            except Exception:
+                detalle = r.text[:120]
         raise NvrError(detalle or f"El servidor devolvió {r.status_code}",
                        r.status_code)
 
@@ -132,6 +143,12 @@ def set_cameras(camaras):
                  retention_days
     """
     return _request("PUT", "/api/cameras", json={"cameras": camaras})
+
+
+def delete_camera_recordings(camera_id):
+    """Borra en el NVR todo el material grabado de una cámara."""
+    return _request("DELETE", f"/api/cameras/{camera_id}/recordings",
+                    timeout=120)
 
 
 def set_settings(ajustes):

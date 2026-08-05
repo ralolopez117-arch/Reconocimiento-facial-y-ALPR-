@@ -132,8 +132,9 @@ def set_cameras():
     Recibe de la aplicación qué cámaras grabar y con cuánta retención.
 
     Se reemplaza la lista completa, pero conservando las cámaras que ya no
-    vengan: sus grabaciones siguen en disco y deben poder consultarse y
-    caducar con normalidad, solo que deshabilitadas.
+    vengan: quedan deshabilitadas y sus grabaciones siguen en disco, intactas.
+    Dejar de grabar nunca borra lo grabado; para eso está DELETE
+    /api/cameras/<id>/recordings.
     """
     datos = request.json or {}
     entrantes = datos.get("cameras", [])
@@ -177,6 +178,41 @@ def set_cameras():
     recorder_manager.sync()
 
     return jsonify({"status": "success", "cameras": len(nuevas)})
+
+
+@app.route("/api/cameras/<camera_id>/recordings", methods=["DELETE"])
+@token_required
+def delete_camera_recordings(camera_id):
+    """
+    Borra todas las grabaciones de una cámara, dejando su configuración intacta.
+
+    Si la cámara está grabando, se para antes: ffmpeg tiene abierto el segmento
+    en curso y en Windows un archivo en uso no se puede borrar. Al terminar se
+    vuelve a sincronizar, de modo que la grabación se reanuda sola y lo único
+    que se pierde es el material antiguo, que es lo que se pidió.
+    """
+    config = load_config()
+    info = config.get("cameras", {}).get(camera_id)
+    if info is None:
+        return jsonify({"status": "error",
+                        "message": "Esa cámara no está registrada"}), 404
+
+    estaba_grabando = bool(info.get("enabled"))
+    if estaba_grabando:
+        info["enabled"] = False
+        save_config(config)
+        recorder_manager.sync()
+
+    try:
+        dias, bytes_liberados = storage.delete_camera_recordings(camera_id)
+    finally:
+        if estaba_grabando:
+            info["enabled"] = True
+            save_config(config)
+            recorder_manager.sync()
+
+    return jsonify({"status": "success", "days_deleted": dias,
+                    "bytes_freed": bytes_liberados})
 
 
 @app.route("/api/settings", methods=["PUT"])
