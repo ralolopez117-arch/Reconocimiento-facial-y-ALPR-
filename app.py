@@ -21,6 +21,7 @@ from camera_health import health_monitor
 from analysis_queue import analysis_queue
 from ptz_control import get_ptz_controller
 import nvr_client
+import live_views
 
 app = Flask(__name__)
 app.secret_key = auth.get_secret_key()
@@ -32,6 +33,7 @@ app.permanent_session_lifetime = datetime.timedelta(days=7)
 auth.init_users()
 auth.init_preferences()
 audit.init_audit()
+live_views.init_live_views()
 
 # Start background processor manager
 background_manager.start()
@@ -144,6 +146,75 @@ def update_preferences():
     if error:
         return jsonify({'status': 'error', 'message': error}), 400
     return jsonify({'status': 'success', **auth.get_preferences(session['user_id'])})
+
+
+# ---------------------------------------------------------------------------
+# Disposición de la cuadrícula en directo
+#
+# Es preferencia personal, no configuración del sistema: lleva login_required y
+# no admin_required, y siempre actúa sobre el usuario de la sesión, nunca sobre
+# otro.
+# ---------------------------------------------------------------------------
+def _ids_de_camaras():
+    """Identificadores que existen ahora mismo, para descartar los obsoletos."""
+    return {c['id'] for c in load_config().get('cameras', [])}
+
+@app.route('/api/live_layout', methods=['GET'])
+@login_required
+def get_live_layout():
+    return jsonify(live_views.get_layout(session['user_id']) or {})
+
+@app.route('/api/live_layout', methods=['PUT'])
+@login_required
+def update_live_layout():
+    """
+    Guarda lo que el usuario tiene en pantalla.
+
+    Lo llama el navegador tras cada cambio, así que no se audita: llenaría el
+    registro de ruido y no modifica nada del sistema.
+    """
+    datos = request.json or {}
+    error = live_views.save_layout(session['user_id'], datos.get('layout'),
+                                   datos.get('cameras', []), _ids_de_camaras())
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+    return jsonify({'status': 'success'})
+
+@app.route('/api/views', methods=['GET'])
+@login_required
+def get_views():
+    return jsonify({'views': live_views.list_views(session['user_id'])})
+
+@app.route('/api/views', methods=['POST'])
+@login_required
+def add_view():
+    datos = request.json or {}
+    vista_id, error = live_views.create_view(
+        session['user_id'], datos.get('name'), datos.get('layout'),
+        datos.get('cameras', []), _ids_de_camaras())
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+    return jsonify({'status': 'success', 'id': vista_id})
+
+@app.route('/api/views/<int:view_id>', methods=['PUT'])
+@login_required
+def edit_view(view_id):
+    datos = request.json or {}
+    error = live_views.update_view(
+        session['user_id'], view_id, nombre=datos.get('name'),
+        layout=datos.get('layout'), camaras=datos.get('cameras'),
+        ids_validos=_ids_de_camaras())
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+    return jsonify({'status': 'success'})
+
+@app.route('/api/views/<int:view_id>', methods=['DELETE'])
+@login_required
+def remove_view(view_id):
+    error = live_views.delete_view(session['user_id'], view_id)
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 404
+    return jsonify({'status': 'success'})
 
 
 @app.route('/')
@@ -541,6 +612,9 @@ def remove_user(user_id):
     error = auth.delete_user(user_id)
     if error:
         return jsonify({'status': 'error', 'message': error}), 400
+    # Sin esto, sus vistas quedarían huérfanas y un usuario nuevo podría
+    # heredarlas al reutilizarse el identificador.
+    live_views.delete_user_data(user_id)
     audit.log(audit.USER_DELETED, target=objetivo.get('username', user_id))
     return jsonify({'status': 'success'})
 

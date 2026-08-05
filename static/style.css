@@ -2183,3 +2183,149 @@ body:not(.can-export-recordings) .perm-export-recordings {
 :root[data-theme="light"] .icono-salir {
     background-image: url("img/nav-logout-light.png");
 }
+
+/* ---- Vistas guardadas ---- */
+
+/* Van debajo del árbol de cámaras, dentro de la misma barra lateral. La lista
+   de cámaras se queda con el espacio sobrante (flex: 1) y esta sección ocupa
+   solo lo que necesita, con su propio desplazamiento si crecen mucho. */
+.vistas {
+    border-top: 1px solid var(--border-color);
+    padding: 10px 12px 12px;
+    flex-shrink: 0;
+    max-height: 40%;
+    display: flex;
+    flex-direction: column;
+
+    /* La barra lateral se colapsa animando su anchura. Sin esto el contenido
+       se reflowaría durante la animación y daría un salto. */
+    min-width: 276px;
+}
+
+.vistas-cabecera {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.vistas-cabecera h3 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.vistas-nueva {
+    background: var(--surface-2);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    border-radius: 6px;
+    padding: 4px 9px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.2s;
+}
+
+.vistas-nueva:hover {
+    background: var(--accent-soft-strong);
+}
+
+.vistas-lista {
+    list-style: none;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.vista-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface-1);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 7px 9px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.vista-item:hover {
+    background: var(--surface-3);
+}
+
+/* La vista que coincide con lo que hay en pantalla ahora mismo */
+.vista-item.activa {
+    border-color: var(--primary);
+    background: var(--accent-soft);
+}
+
+.vista-nombre {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vista-detalle {
+    font-size: 10px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Acciones ocultas hasta pasar por encima: son destructivas o poco frecuentes
+   y compiten con el nombre por un espacio ya estrecho. */
+.vista-acciones {
+    display: flex;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.vista-item:hover .vista-acciones,
+.vista-item:focus-within .vista-acciones {
+    opacity: 1;
+}
+
+.vista-acciones button {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 1;
+}
+
+.vista-acciones button:hover {
+    background: var(--surface-4);
+    color: var(--text-main);
+}
+
+.vistas-vacio {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    padding: 4px 2px;
+}
+
+.vistas-msg {
+    font-size: 11px;
+    margin-top: 6px;
+    min-height: 0;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.vistas-msg.visible {
+    opacity: 1;
+}

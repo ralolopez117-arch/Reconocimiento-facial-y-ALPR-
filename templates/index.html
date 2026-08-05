@@ -27,6 +27,21 @@
         <ul class="camera-list" id="camera-list">
             <!-- Cameras injected via JS -->
         </ul>
+
+        <!-- Vistas guardadas: composiciones con nombre para saltar entre
+             grupos de cámaras sin volver a arrastrarlas una a una. -->
+        <div class="vistas">
+            <div class="vistas-cabecera">
+                <h3>Mis vistas</h3>
+                <button id="vista-guardar" class="vistas-nueva"
+                        title="Guardar la cuadrícula actual como una vista nueva">
+                    + Guardar</button>
+            </div>
+            <ul class="vistas-lista" id="vistas-lista">
+                <!-- Rellenado por JS -->
+            </ul>
+            <p class="vistas-msg" id="vistas-msg"></p>
+        </div>
     </aside>
 
     <!-- Main Grid -->

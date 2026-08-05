@@ -4,7 +4,13 @@
 const IS_ADMIN = document.body.dataset.role === 'admin';
 
 document.addEventListener('DOMContentLoaded', () => {
-    fetchCameras();
+    // La cuadrícula se restaura DESPUÉS de conocer las cámaras: al colocar un
+    // stream se busca su ficha para pintar la cabecera y los controles PTZ, y
+    // sin ella las celdas saldrían desnudas.
+    fetchCameras().then(async () => {
+        await restaurarComposicionGuardada();
+        await cargarVistas();
+    });
     fetchDisplaySettings();
     fetchCameraStatus();
     // El servidor comprueba cada 30 s; se consulta a mitad de ese ritmo para
@@ -21,6 +27,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Buscador de cámaras por nombre
     document.getElementById('camera-search-input').addEventListener('input', renderCameraList);
+
+    // Guardar la cuadrícula actual como una vista con nombre
+    document.getElementById('vista-guardar').addEventListener('click', guardarVistaNueva);
 
     // Modal logic
     const modal = document.getElementById('modal-overlay');
@@ -271,6 +280,7 @@ function drop(ev) {
         // Persist to global streamState
         const cellIndex = parseInt(cell.dataset.index);
         streamState[cellIndex] = { src: baseSrc, camId: camData.id };
+        guardarComposicionActual();
 
     } catch (e) {
         console.error("Drop parsing error", e);
@@ -309,6 +319,7 @@ function clearCell(ev, index) {
         cell.style.border = '';
     }
     streamState[index] = null;
+    guardarComposicionActual();
 }
 
 // Double click fullscreen
@@ -606,6 +617,8 @@ function setLayout(count) {
     document.querySelectorAll('.layout-btn').forEach(btn => {
         btn.classList.toggle('active', parseInt(btn.dataset.layout) === count);
     });
+
+    guardarComposicionActual();
 }
 
 function clearAllStreams() {
@@ -617,6 +630,7 @@ function clearAllStreams() {
         if (ph) ph.style.display = 'block';
         cell.style.border = '';
     });
+    guardarComposicionActual();
 }
 
 
@@ -3227,3 +3241,267 @@ function pbMensajeExportacion(ok, texto) {
         pbDibujarSeleccion();
     }, true);
 })();
+
+
+// ===========================================================================
+// Vistas de la cuadrícula en directo
+//
+// Dos cosas distintas sobre la misma información:
+//
+//   La vista actual se guarda sola en cuanto cambia, para devolver al usuario
+//   exactamente lo que tenía delante al volver a entrar.
+//
+//   Las vistas guardadas son composiciones con nombre, para saltar entre
+//   grupos de cámaras sin arrastrarlas otra vez una a una.
+//
+// Todo va asociado a la cuenta, no al navegador: quien entre desde otro equipo
+// encuentra sus cámaras donde las dejó.
+// ===========================================================================
+
+let vistasGuardadas = [];
+
+// Mientras se restaura una composición hay que evitar guardar los estados
+// intermedios: al reconstruir la cuadrícula las celdas pasan por vacías, y
+// guardar ese instante borraría justo lo que se está restaurando.
+let restaurandoComposicion = false;
+
+// Y hasta que no se haya leído lo guardado no se guarda nada. Al arrancar, la
+// página construye una cuadrícula vacía de 4 celdas antes de saber qué había:
+// ese estado disparaba un guardado que, si llegaba al servidor antes que la
+// lectura, borraba justo lo que se estaba a punto de restaurar.
+let composicionRestaurada = false;
+
+/** Cámara de cada celda, en orden, con null en las vacías. */
+function composicionActual() {
+    const celdas = document.querySelectorAll('#grid-container .video-cell');
+    return [...celdas].map(celda => {
+        // Se lee del DOM y no de streamState porque es la única fuente fiable:
+        // al cambiar de distribución las cámaras se recolocan y los índices de
+        // streamState dejan de corresponder con las celdas.
+        const img = celda.querySelector('img');
+        if (!img || !img.src) return null;
+        const partes = img.src.split('/video_feed/');
+        return partes.length > 1 ? partes[1].split('?')[0] : null;
+    });
+}
+
+/** Coloca una composición concreta: distribución y cámara de cada celda. */
+function aplicarComposicion(layout, camaras) {
+    restaurandoComposicion = true;
+    try {
+        clearAllStreams();
+        setLayout(layout);
+
+        const celdas = document.querySelectorAll('#grid-container .video-cell');
+        (camaras || []).forEach((camId, i) => {
+            if (!camId || i >= celdas.length) return;
+            // Una cámara borrada del sistema deja su hueco vacío, en vez de
+            // invalidar la vista entera o dejar un recuadro roto.
+            if (!cameras.some(c => c.id === camId)) return;
+            const src = `/video_feed/${camId}`;
+            _placeCellStream(celdas[i], src);
+            streamState[i] = { src, camId };
+        });
+    } finally {
+        restaurandoComposicion = false;
+    }
+    marcarVistaActiva();
+}
+
+/**
+ * Guarda la cuadrícula actual, agrupando los cambios seguidos.
+ *
+ * Soltar una cámara o cambiar de distribución dispara varios cambios en
+ * cadena; sin agrupar se enviaría una petición por cada uno.
+ */
+let guardadoDeVistaPendiente = null;
+function guardarComposicionActual() {
+    if (restaurandoComposicion || !composicionRestaurada) return;
+    clearTimeout(guardadoDeVistaPendiente);
+    guardadoDeVistaPendiente = setTimeout(async () => {
+        try {
+            await fetch('/api/live_layout', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    layout: currentLayout,
+                    cameras: composicionActual(),
+                }),
+            });
+        } catch (e) {
+            // Un corte de red no debe estropear nada: el siguiente cambio
+            // vuelve a intentarlo con el estado ya actualizado.
+        }
+        marcarVistaActiva();
+    }, 500);
+}
+
+async function restaurarComposicionGuardada() {
+    try {
+        const res = await fetch('/api/live_layout');
+        if (!res.ok) return;
+        const d = await res.json();
+        if (!d || !d.layout) return;
+        aplicarComposicion(d.layout, d.cameras || []);
+    } catch (e) {
+        // Sin nada que restaurar se deja la cuadrícula por defecto
+    } finally {
+        // También si no había nada guardado o falló la lectura: a partir de
+        // aquí lo que haya en pantalla es decisión del usuario y debe guardarse.
+        composicionRestaurada = true;
+    }
+}
+
+// ---- Vistas con nombre ----
+
+async function cargarVistas() {
+    try {
+        const res = await fetch('/api/views');
+        if (!res.ok) return;
+        vistasGuardadas = (await res.json()).views || [];
+    } catch (e) {
+        vistasGuardadas = [];
+    }
+    renderVistas();
+}
+
+function renderVistas() {
+    const lista = document.getElementById('vistas-lista');
+    if (!lista) return;
+    lista.innerHTML = '';
+
+    if (!vistasGuardadas.length) {
+        const vacio = document.createElement('li');
+        vacio.className = 'vistas-vacio';
+        vacio.textContent = 'Coloca las cámaras como quieras y pulsa «+ Guardar» '
+                          + 'para poder volver a esta disposición.';
+        lista.appendChild(vacio);
+        return;
+    }
+
+    vistasGuardadas.forEach(v => {
+        const li = document.createElement('li');
+        li.className = 'vista-item';
+        li.dataset.id = v.id;
+        li.title = `Aplicar «${v.name}»`;
+
+        const nombre = document.createElement('span');
+        nombre.className = 'vista-nombre';
+        nombre.textContent = v.name;
+
+        const detalle = document.createElement('span');
+        detalle.className = 'vista-detalle';
+        detalle.textContent = `${v.used}/${v.layout}`;
+        detalle.title = `${v.used} cámara(s) en una cuadrícula de ${v.layout}`;
+
+        const acciones = document.createElement('span');
+        acciones.className = 'vista-acciones';
+        acciones.appendChild(botonDeVista('⟳', 'Sustituir por la cuadrícula actual',
+                                          () => actualizarVista(v.id, v.name)));
+        acciones.appendChild(botonDeVista('✎', 'Cambiar el nombre',
+                                          () => renombrarVista(v.id, v.name)));
+        acciones.appendChild(botonDeVista('🗑', 'Eliminar la vista',
+                                          () => borrarVista(v.id, v.name)));
+
+        li.append(nombre, detalle, acciones);
+        li.addEventListener('click', e => {
+            // Los botones de acción viven dentro de la fila, que también es
+            // pulsable: sin esto, borrar una vista la aplicaría antes.
+            if (e.target.closest('.vista-acciones')) return;
+            aplicarComposicion(v.layout, v.cameras);
+            guardarComposicionActual();
+        });
+        lista.appendChild(li);
+    });
+
+    marcarVistaActiva();
+}
+
+function botonDeVista(texto, titulo, alPulsar) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = texto;
+    b.title = titulo;
+    b.addEventListener('click', e => { e.stopPropagation(); alPulsar(); });
+    return b;
+}
+
+/** Resalta la vista que coincide con lo que hay en pantalla. */
+function marcarVistaActiva() {
+    const actual = composicionActual();
+    document.querySelectorAll('.vista-item').forEach(li => {
+        const v = vistasGuardadas.find(x => String(x.id) === li.dataset.id);
+        const igual = v && v.layout === currentLayout
+                   && v.cameras.length === actual.length
+                   && v.cameras.every((c, i) => (c || null) === (actual[i] || null));
+        li.classList.toggle('activa', !!igual);
+    });
+}
+
+function mensajeDeVistas(texto, error = false) {
+    const msg = document.getElementById('vistas-msg');
+    if (!msg) return;
+    msg.textContent = texto;
+    msg.style.color = error ? '#f87171' : '#4ade80';
+    msg.classList.add('visible');
+    clearTimeout(mensajeDeVistas._t);
+    mensajeDeVistas._t = setTimeout(() => msg.classList.remove('visible'), 3500);
+}
+
+async function guardarVistaNueva() {
+    const actual = composicionActual();
+    if (!actual.some(Boolean)) {
+        mensajeDeVistas('Coloca al menos una cámara antes de guardar.', true);
+        return;
+    }
+    const nombre = prompt('Nombre para esta vista:', `Vista ${vistasGuardadas.length + 1}`);
+    if (nombre === null) return;
+
+    const res = await fetch('/api/views', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: nombre, layout: currentLayout, cameras: actual }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { mensajeDeVistas(d.message || 'No se pudo guardar', true); return; }
+    await cargarVistas();
+    mensajeDeVistas(`Vista «${nombre.trim()}» guardada`);
+}
+
+async function actualizarVista(id, nombre) {
+    if (!confirm(`¿Sustituir «${nombre}» por la cuadrícula que tienes ahora?`)) return;
+
+    const res = await fetch(`/api/views/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ layout: currentLayout, cameras: composicionActual() }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { mensajeDeVistas(d.message || 'No se pudo actualizar', true); return; }
+    await cargarVistas();
+    mensajeDeVistas(`«${nombre}» actualizada`);
+}
+
+async function renombrarVista(id, nombreActual) {
+    const nombre = prompt('Nuevo nombre:', nombreActual);
+    if (nombre === null || nombre.trim() === nombreActual) return;
+
+    const res = await fetch(`/api/views/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: nombre }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { mensajeDeVistas(d.message || 'No se pudo renombrar', true); return; }
+    await cargarVistas();
+}
+
+async function borrarVista(id, nombre) {
+    if (!confirm(`¿Eliminar la vista «${nombre}»?\n\n`
+                 + 'Las cámaras no se tocan; solo se borra la disposición guardada.')) return;
+    const res = await fetch(`/api/views/${id}`, { method: 'DELETE' });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { mensajeDeVistas(d.message || 'No se pudo eliminar', true); return; }
+    await cargarVistas();
+    mensajeDeVistas(`«${nombre}» eliminada`);
+}
