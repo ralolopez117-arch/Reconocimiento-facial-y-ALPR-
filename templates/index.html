@@ -585,9 +585,10 @@
                 </p>
 
                 <p class="settings-hint" style="margin-top: 20px;">
-                    <strong>Superposiciones de video</strong> — qué se dibuja sobre la
-                    imagen. Se aplican de inmediato en las cámaras activas y, al estar
-                    grabadas en el propio video, son <em>comunes a todos los usuarios</em>.
+                    <strong>Superposiciones de video</strong>
+                    <span>— qué se dibuja sobre la imagen. Se aplican de inmediato en las
+                    cámaras activas y, al estar grabadas en el propio video, son comunes a
+                    todos los usuarios.</span>
                 </p>
                 <label class="toggle-row settings-toggle">
                     <span class="option-body">
@@ -629,10 +630,9 @@
             <!-- Tab: Usuarios (solo administrador) -->
             <div id="settings-tab-users" class="fr-tab-content">
                 <p class="settings-hint">
-                    Los <strong>administradores</strong> tienen acceso completo. Los
-                    <strong>operadores</strong> solo visualizan cámaras y añaden registros
-                    de rostros y placas: no pueden editar ni eliminar nada, ni cambiar el
-                    país ni el modo de detección.
+                    Los administradores tienen acceso completo. Los operadores solo
+                    visualizan cámaras y añaden registros de rostros y placas: no pueden
+                    editar ni eliminar nada, ni cambiar el país ni el modo de detección.
                 </p>
 
                 <form id="user-create-form" style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-bottom:16px;">
@@ -680,8 +680,8 @@
             <div id="settings-tab-nvr" class="fr-tab-content">
                 <p class="settings-hint">
                     El servidor de grabaciones puede estar en este mismo equipo o en otro
-                    de la red local. Al arrancarlo por primera vez muestra una
-                    <strong>clave de acceso</strong> que hay que copiar aquí.
+                    de la red local. Al arrancarlo por primera vez muestra una clave de
+                    acceso que hay que copiar aquí.
                 </p>
 
                 <label class="settings-field-label" for="nvr-url">Dirección del servidor</label>
@@ -763,8 +763,8 @@
                 <p class="settings-hint">
                     Todas las acciones que modifican el sistema quedan anotadas: altas y
                     bajas de cámaras, cambios de configuración, gestión de usuarios,
-                    borrado de registros y accesos. <strong>No se puede borrar</strong> desde
-                    la aplicación: un historial que el administrador puede vaciar no sirve
+                    borrado de registros y accesos. No se puede borrar desde la
+                    aplicación: un historial que el administrador puede vaciar no sirve
                     para auditar.
                 </p>
 
@@ -802,9 +802,9 @@
             <!-- Tab: Sesión (solo administrador) -->
             <div id="settings-tab-session" class="fr-tab-content">
                 <p class="settings-hint">
-                    La sesión se cierra tras este tiempo <strong>sin visualizar ninguna
-                    cámara</strong>. Mientras haya un stream abierto en la cuadrícula, la
-                    sesión no caduca por mucho tiempo que pase.
+                    La sesión se cierra tras este tiempo sin visualizar ninguna cámara.
+                    Mientras haya un stream abierto en la cuadrícula, la sesión no caduca
+                    por mucho tiempo que pase.
                 </p>
 
                 <label class="settings-field-label" for="session-timeout-range">
@@ -814,8 +814,8 @@
                 <input type="range" id="session-timeout-range" class="settings-range"
                        min="0" max="120" step="5" value="15">
                 <p class="settings-field-desc">
-                    Ponlo en <strong>0</strong> para desactivar la caducidad, en instalaciones
-                    de sala de control donde la pantalla debe permanecer siempre abierta.
+                    Ponlo en 0 para desactivar la caducidad, en instalaciones de sala de
+                    control donde la pantalla debe permanecer siempre abierta.
                 </p>
 
                 <div id="session-settings-msg" class="settings-msg"></div>
