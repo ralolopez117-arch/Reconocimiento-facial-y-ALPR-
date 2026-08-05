@@ -135,8 +135,34 @@ async function fetchCameraStatus() {
         const data = await res.json();
         cameraStatus = data.cameras || {};
         renderCameraList();
+        updatePanelStatusDots();
     } catch (e) {
         // Un fallo puntual de red no debe borrar los indicadores existentes
+    }
+}
+
+/**
+ * Actualiza el punto de estado (status-dot) de cada panel de vídeo activo
+ * según el último estado recibido del servidor. Sin esto, el punto siempre
+ * aparece verde aunque la cámara esté caída.
+ */
+function updatePanelStatusDots() {
+    document.querySelectorAll('.video-cell .status-dot[data-cam-id]').forEach(dot => {
+        const camId = dot.dataset.camId;
+        const salud = cameraStatus[camId] || { status: 'unknown' };
+        // Quitar clases anteriores y aplicar la actual
+        dot.classList.remove('estado-online', 'estado-offline', 'estado-unknown');
+        dot.classList.add(`estado-${salud.status in ETIQUETAS_ESTADO ? salud.status : 'unknown'}`);
+        dot.title = descripcionDeEstado(salud);
+    });
+
+    // Actualizar también los marcadores del mapa Leaflet si está abierto
+    if (MAPA && MAPA.marcadores) {
+        cameras.forEach(cam => {
+            const marcador = MAPA.marcadores[cam.id];
+            if (!marcador) return;
+            marcador.setIcon(iconoDeCamara(cam));
+        });
     }
 }
 
@@ -463,9 +489,15 @@ function renderCellHeader(cell, cam) {
     const ptzBadge = isPtz ? '<span class="ptz-badge">PTZ</span>' : '';
     const index = cell.dataset.index;
 
+    // El estado inicial se toma del caché actual; se actualizará en el
+    // próximo ciclo de fetchCameraStatus vía updatePanelStatusDots().
+    const salud = cameraStatus[cam.id] || { status: 'unknown' };
+    const estadoClase = `estado-${salud.status in ETIQUETAS_ESTADO ? salud.status : 'unknown'}`;
+    const estadoTitulo = descripcionDeEstado(salud);
+
     header.innerHTML = `
         <div class="camera-header-left">
-            <span class="status-dot" title="Transmisión En Vivo"></span>
+            <span class="status-dot ${estadoClase}" data-cam-id="${cam.id}" title="${estadoTitulo}"></span>
             <span class="camera-title">${cam.name}</span>
             ${ptzBadge}
         </div>
@@ -3627,6 +3659,11 @@ function construirMapa() {
         MAPA.capa = L.imageOverlay(`/static/maps/${MAPA.ajustes.image}`, limites)
                      .addTo(MAPA.leaflet);
         MAPA.leaflet.fitBounds(limites);
+        // Zoom al que el plano entra justo en la ventana. Sirve de referencia
+        // para decidir cuánto detalle mostrar en los marcadores: sobre un plano
+        // no hay niveles de zoom con significado propio como en un mapa de
+        // calles, así que se mide respecto a esta vista.
+        MAPA.zoomBase = MAPA.leaflet.getZoom();
         // Sin este tope se puede alejar la imagen hasta perderla de vista
         MAPA.leaflet.setMaxBounds(L.latLngBounds(limites).pad(0.5));
     } else {
@@ -3637,6 +3674,10 @@ function construirMapa() {
             maxZoom: MAPA.ajustes.max_zoom || 19,
         }).addTo(MAPA.leaflet);
     }
+
+    // Los marcadores muestran más o menos información según el zoom
+    MAPA.leaflet.on('zoomend', actualizarDetalleDeMarcadores);
+    actualizarDetalleDeMarcadores();
 
     // Soltar una cámara arrastrada desde la lista lateral
     lienzo.addEventListener('dragover', e => {
@@ -3653,6 +3694,37 @@ function construirMapa() {
     });
 }
 
+/**
+ * Ajusta cuánta información muestra cada marcador según el zoom.
+ *
+ * Con el mapa alejado, un rótulo con el nombre por cada cámara tapa justamente
+ * lo que se quiere ver, y varios nombres se solapan entre sí. Se muestra
+ * entonces solo el número, que ocupa un círculo pequeño; al acercarse aparece
+ * el nombre, que a esa escala ya cabe sin estorbar.
+ *
+ * El umbral se fija de forma distinta en cada fondo. En un mapa de calles los
+ * niveles de zoom tienen un significado conocido —13 es aproximadamente el
+ * barrio— y ahí es donde el nombre empieza a ser útil. Sobre un plano propio no
+ * existe esa escala, así que se mide respecto al zoom en que la imagen encaja
+ * en la ventana.
+ */
+function actualizarDetalleDeMarcadores() {
+    if (!MAPA.leaflet) return;
+    const lienzo = document.getElementById('map-lienzo');
+    const z = MAPA.leaflet.getZoom();
+
+    let nivel;
+    if (mapaEsImagen()) {
+        const base = (typeof MAPA.zoomBase === 'number') ? MAPA.zoomBase : 0;
+        nivel = z >= base ? 'completo' : (z >= base - 1.5 ? 'medio' : 'minimo');
+    } else {
+        nivel = z >= 13 ? 'completo' : (z >= 10 ? 'medio' : 'minimo');
+    }
+
+    lienzo.classList.remove('detalle-minimo', 'detalle-medio', 'detalle-completo');
+    lienzo.classList.add(`detalle-${nivel}`);
+}
+
 function iconoDeCamara(cam, colocadaAhora) {
     const salud = cameraStatus[cam.id] || { status: 'unknown' };
     return L.divIcon({
@@ -3660,6 +3732,7 @@ function iconoDeCamara(cam, colocadaAhora) {
         html: `<span class="map-marcador estado-${salud.status}">
                    <span class="map-marcador-num">${cam.numero || ''}</span>
                    <span class="map-marcador-nombre">${cam.name}</span>
+                   <span class="map-marcador-globo">${cam.name}</span>
                </span>`,
         iconSize: null,
         iconAnchor: [10, 10],

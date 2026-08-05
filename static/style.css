@@ -1957,6 +1957,31 @@ body:not(.can-export-recordings) .perm-export-recordings {
     }
 }
 
+/* Variantes de estado del punto en el panel de vídeo */
+.status-dot.estado-online {
+    background-color: #10b981;
+    box-shadow: 0 0 8px #10b981;
+    animation: pulse-dot 1.8s infinite ease-in-out;
+}
+
+.status-dot.estado-offline {
+    background-color: #ef4444;
+    box-shadow: 0 0 8px #ef4444;
+    animation: none;
+}
+
+@keyframes pulse-dot-unknown {
+    0%   { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(156,163,175,0.7); }
+    70%  { transform: scale(1);    box-shadow: 0 0 0 5px rgba(156,163,175,0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(156,163,175,0); }
+}
+
+.status-dot.estado-unknown {
+    background-color: #9ca3af;
+    box-shadow: 0 0 6px #9ca3af;
+    animation: pulse-dot-unknown 2.5s infinite ease-in-out;
+}
+
 .camera-header-actions {
     display: flex;
     align-items: center;
@@ -2555,28 +2580,30 @@ body:not(.can-export-recordings) .perm-export-recordings {
     border: none;
 }
 
+/* El marcador crece o se reduce según el zoom, para no tapar el mapa cuando se
+   ve mucho terreno. Lo controla la clase detalle-* que app.js pone en el
+   contenedor; aquí solo se describe cada nivel. */
 .map-marcador {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 3px 8px 3px 4px;
+    gap: 5px;
     border-radius: 999px;
     background: var(--modal-bg);
     border: 2px solid var(--text-muted);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    box-shadow: 0 1px 6px rgba(0,0,0,0.45);
     white-space: nowrap;
-    font-size: 11px;
     color: var(--text-main);
     cursor: pointer;
-    transition: transform 0.15s;
+    /* Se anima el tamaño para que al alejarse los rótulos no desaparezcan de
+       golpe, que se lee como un parpadeo. */
+    transition: padding 0.15s ease, transform 0.15s ease;
 }
 
 .map-marcador:hover {
-    transform: scale(1.06);
+    transform: scale(1.08);
+    z-index: 500;
 }
 
-/* Mismo código de color que la lista de cámaras: verde en servicio, rojo
-   caída, gris sin comprobar. */
 .map-marcador.estado-online  { border-color: #22c55e; }
 .map-marcador.estado-offline { border-color: #ef4444; opacity: 0.8; }
 
@@ -2584,21 +2611,92 @@ body:not(.can-export-recordings) .perm-export-recordings {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 18px;
-    height: 18px;
     border-radius: 50%;
     background: var(--surface-sunken);
-    color: var(--text-muted);
-    font-size: 10px;
+    color: var(--text-main);
     font-weight: 700;
     font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
 }
 
 .map-marcador-nombre {
     font-weight: 600;
-    max-width: 150px;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* ---- Nivel de detalle ---- */
+
+/* Alejado: solo el número, en un círculo pequeño. Sin relleno alrededor, el
+   marcador es el propio círculo y ocupa lo mínimo. */
+.map-lienzo.detalle-minimo .map-marcador,
+.map-lienzo.detalle-medio .map-marcador {
+    padding: 0;
+}
+
+.map-lienzo.detalle-minimo .map-marcador-nombre,
+.map-lienzo.detalle-medio .map-marcador-nombre {
+    display: none;
+}
+
+.map-lienzo.detalle-minimo .map-marcador-num {
+    width: 18px;
+    height: 18px;
+    font-size: 9px;
+}
+
+.map-lienzo.detalle-medio .map-marcador-num {
+    width: 22px;
+    height: 22px;
+    font-size: 11px;
+}
+
+/* Acercado: número y nombre. El texto se mantiene pequeño y con un ancho
+   máximo, porque un nombre largo a tamaño de interfaz taparía media calle. */
+.map-lienzo.detalle-completo .map-marcador {
+    padding: 2px 9px 2px 2px;
+}
+
+.map-lienzo.detalle-completo .map-marcador-num {
+    width: 20px;
+    height: 20px;
+    font-size: 10px;
+}
+
+.map-lienzo.detalle-completo .map-marcador-nombre {
+    font-size: 10.5px;
+    max-width: 132px;
+}
+
+/* Con el nombre oculto hace falta otra forma de saber cuál es cada cámara sin
+   tener que acercarse: al pasar por encima aparece junto al marcador. */
+.map-marcador-globo {
+    display: none;
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 6px);
+    transform: translateX(-50%);
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: var(--modal-bg);
+    border: 1px solid var(--border-color);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.45);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-main);
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 600;
+}
+
+.map-lienzo.detalle-minimo .map-marcador:hover .map-marcador-globo,
+.map-lienzo.detalle-medio .map-marcador:hover .map-marcador-globo {
+    display: block;
+}
+
+/* El globo se sitúa respecto al marcador */
+.map-lienzo .map-marcador {
+    position: relative;
 }
 
 .map-msg {
