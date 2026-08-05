@@ -1431,6 +1431,31 @@ body:not(.can-export-recordings) .perm-export-recordings {
     font-size: 10px;
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
+
+    /* La franja hace de asidero para recorrer el día. Con solo la altura del
+       texto quedaba en unos 13 px, demasiado fina para agarrarla sin apuntar
+       con cuidado; el relleno la lleva a una altura cómoda sin separar
+       visualmente las etiquetas de la pista. */
+    padding: 4px 0 6px;
+
+    /* Arrastrar sobre texto lo selecciona y el gesto se convierte en un
+       subrayado azul en vez de un desplazamiento. */
+    user-select: none;
+
+    /* En pantalla táctil, el navegador se quedaría el gesto para desplazar la
+       página y el arrastre no llegaría nunca. */
+    touch-action: none;
+}
+
+/* Solo se puede recorrer el día cuando hay más día del que cabe: con la vista
+   completa el cursor no debe prometer un gesto que no hace nada. */
+.pb-hours.pb-hours-desplazable {
+    cursor: grab;
+}
+
+.pb-hours.pb-hours-arrastrando {
+    cursor: grabbing;
+    color: var(--text-main);
 }
 
 /* En pantallas estrechas la barra lateral estorba más de lo que ayuda */

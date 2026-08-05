@@ -2409,6 +2409,93 @@ function pbAplicarZoom(indice, centroDeseado = null) {
     pbActualizarControlesZoom();
 }
 
+/**
+ * Mueve la ventana visible sin salirse del día.
+ *
+ * Se sujeta el centro, no solo el dibujo: si se dejara crecer sin límite, al
+ * arrastrar más allá del final del día habría que desandar todo ese exceso
+ * antes de que la línea volviera a moverse, y daría la sensación de haberse
+ * quedado enganchada.
+ */
+function pbDesplazarVentana(centro) {
+    const span = Math.max(60, Math.min(PB_SEGUNDOS_DIA, PB.zoom.span));
+    const medio = span / 2;
+    const nuevo = Math.max(medio, Math.min(PB_SEGUNDOS_DIA - medio, centro));
+    if (nuevo === PB.zoom.centro) return;
+    PB.zoom.centro = nuevo;
+    pbRedibujarEnElSiguienteCuadro();
+}
+
+/**
+ * Redibuja como mucho una vez por cuadro.
+ *
+ * Dibujar la línea de tiempo reconstruye los tramos, las marcas horarias y la
+ * miniatura. Hacerlo en cada mousemove —que llegan más rápido que los cuadros—
+ * multiplica ese trabajo sin que se vea ninguna diferencia.
+ */
+let pbRedibujadoPendiente = null;
+function pbRedibujarEnElSiguienteCuadro() {
+    if (pbRedibujadoPendiente !== null) return;
+    pbRedibujadoPendiente = requestAnimationFrame(() => {
+        pbRedibujadoPendiente = null;
+        pbDibujarLineaDeTiempo();
+    });
+}
+
+/**
+ * Arrastrar la franja de horas para recorrer el día.
+ *
+ * Al ampliar, la línea muestra una porción pequeña y hacía falta el ratón sobre
+ * la miniatura, o varios clics, para llegar a otro momento. Aquí se agarra la
+ * escala y se tira de ella.
+ *
+ * Va en la franja de horas y no en la pista: allí el arrastre ya mueve el
+ * cabezal de reproducción, y en modo recorte marca un tramo. Son tres gestos
+ * distintos que no pueden compartir el mismo sitio.
+ *
+ * Se usan eventos de puntero en lugar de ratón, a diferencia del resto del
+ * reproductor, por dos motivos: setPointerCapture mantiene el arrastre aunque
+ * el puntero se salga de la franja, que es estrecha y se abandona enseguida, y
+ * de paso funciona con pantallas táctiles.
+ */
+function pbActivarArrastreDeEscala() {
+    const horas = document.getElementById('pb-hours');
+    const linea = document.getElementById('pb-timeline');
+    let arrastre = null;
+
+    const sePuedeDesplazar = () => PB.zoom.span < PB_SEGUNDOS_DIA;
+
+    horas.addEventListener('pointerdown', e => {
+        // Con el día entero a la vista no hay a dónde desplazarse
+        if (!sePuedeDesplazar() || e.button !== 0) return;
+        // Sin esto, arrastrar selecciona el texto de las etiquetas
+        e.preventDefault();
+        horas.setPointerCapture(e.pointerId);
+        arrastre = { x: e.clientX, centro: PB.zoom.centro };
+        horas.classList.add('pb-hours-arrastrando');
+    });
+
+    horas.addEventListener('pointermove', e => {
+        if (!arrastre) return;
+        // La equivalencia píxel-segundo se toma de la pista, no de la franja:
+        // así la escala acompaña exactamente al contenido que hay encima.
+        const ancho = linea.getBoundingClientRect().width || 1;
+        const segundosPorPixel = PB.zoom.span / ancho;
+        // Se resta: al tirar hacia la derecha el contenido acompaña a la mano,
+        // de modo que aparece lo anterior, como al desplazar un mapa.
+        pbDesplazarVentana(arrastre.centro - (e.clientX - arrastre.x) * segundosPorPixel);
+    });
+
+    const soltar = e => {
+        if (!arrastre) return;
+        arrastre = null;
+        horas.classList.remove('pb-hours-arrastrando');
+        if (horas.hasPointerCapture(e.pointerId)) horas.releasePointerCapture(e.pointerId);
+    };
+    horas.addEventListener('pointerup', soltar);
+    horas.addEventListener('pointercancel', soltar);
+}
+
 function pbActualizarControlesZoom() {
     const i = pbNivelZoom();
     document.getElementById('pb-zoom-label').textContent =
@@ -2416,8 +2503,13 @@ function pbActualizarControlesZoom() {
     document.getElementById('pb-zoom-out').disabled = i <= 0;
     document.getElementById('pb-zoom-in').disabled = i >= PB_NIVELES_ZOOM.length - 1;
     // La miniatura solo aporta cuando no se ve el día entero
-    document.getElementById('pb-minimap')
-        .classList.toggle('visible', PB.zoom.span < PB_SEGUNDOS_DIA);
+    const ampliada = PB.zoom.span < PB_SEGUNDOS_DIA;
+    document.getElementById('pb-minimap').classList.toggle('visible', ampliada);
+
+    // Y con el día entero a la vista tampoco hay a dónde desplazarse, así que
+    // la escala deja de anunciarse como arrastrable.
+    document.getElementById('pb-hours')
+        .classList.toggle('pb-hours-desplazable', ampliada);
 }
 
 /**
@@ -2733,6 +2825,9 @@ async function pbIrAInstante(momento) {
         PB.zoom.centro = frac * PB_SEGUNDOS_DIA;
         pbDibujarLineaDeTiempo();
     });
+
+    // Arrastrar la escala de horas para recorrer el día
+    pbActivarArrastreDeEscala();
 
     // Eventos del vídeo
     video.addEventListener('ended', pbSegmentoTerminado);
