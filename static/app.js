@@ -340,6 +340,8 @@ function clearCellElements(cell) {
     if (existingHeader) existingHeader.remove();
     const existingZoom = cell.querySelector('.zoom-indicator');
     if (existingZoom) existingZoom.remove();
+    const existingUbi = cell.querySelector('.cam-ubicacion');
+    if (existingUbi) existingUbi.remove();
     const existingFit = cell.querySelector('.cam-fit-toggle');
     if (existingFit) existingFit.remove();
     cell.classList.remove('ptz-active', 'ptz-dragging', 'fit-cover');
@@ -409,6 +411,7 @@ function _placeCellStream(cell, baseSrc, camData = null) {
     if (camData) {
         renderCellHeader(cell, camData);
         renderFitToggle(cell, camData);
+        renderBotonUbicacion(cell, camData);
         const isPtz = camData.is_ptz === true || camData.is_ptz === 'true' || camData.is_ptz == 1;
         if (isPtz) {
             attachPTZListeners(cell, camData);
@@ -479,6 +482,30 @@ function renderFitToggle(cell, cam) {
     btn.addEventListener('dblclick', (e) => e.stopPropagation());
     cell.appendChild(btn);
     applyFitMode(cell, getFitMode(cam.id));
+}
+
+/**
+ * Botón que lleva del panel de vídeo a la ubicación de esa cámara en el mapa.
+ *
+ * Va abajo a la izquierda, en espejo del ajuste de imagen que ocupa la
+ * derecha, y aparece al pasar por encima como el resto de controles de la
+ * celda: en una sala de control lo que importa es la imagen, y los mandos solo
+ * cuando se buscan.
+ */
+function renderBotonUbicacion(cell, cam) {
+    const btn = document.createElement('button');
+    btn.className = 'cam-ubicacion';
+    btn.type = 'button';
+    btn.title = `Ver ${cam.name} en el mapa`;
+    btn.setAttribute('aria-label', `Ver ${cam.name} en el mapa`);
+
+    // Sin esto el clic llega a la celda y activa el arrastre o el control PTZ
+    btn.addEventListener('click', e => {
+        e.stopPropagation();
+        abrirMapa(cam.id);
+    });
+    btn.addEventListener('dblclick', e => e.stopPropagation());
+    cell.appendChild(btn);
 }
 
 function renderCellHeader(cell, cam) {
@@ -3618,7 +3645,16 @@ function mapaCoordenadasParaGuardar(latlng) {
     return { x: latlng.lng, y: latlng.lat };
 }
 
-async function abrirMapa() {
+/**
+ * Abre el mapa.
+ *
+ * Args:
+ *   camaraDestacada: si se indica, en lugar de encuadrar en el conjunto se va
+ *                    a esa cámara y se resalta. Lo usa el botón de cada panel
+ *                    de vídeo, donde la pregunta no es "dónde están todas" sino
+ *                    "dónde está justo esta".
+ */
+async function abrirMapa(camaraDestacada = null) {
     document.getElementById('map-overlay').classList.add('active');
     try {
         MAPA.ajustes = await (await fetch('/api/map/settings')).json();
@@ -3637,8 +3673,42 @@ async function abrirMapa() {
         MAPA.leaflet.invalidateSize();
         // El encuadre va después de medir: calculado sobre un contenedor de
         // tamaño cero, el zoom saldría mal.
-        encuadrarEnLasCamaras();
+        if (camaraDestacada) destacarCamaraEnMapa(camaraDestacada);
+        else encuadrarEnLasCamaras();
     }, 60);
+}
+
+/**
+ * Centra el mapa en una cámara concreta y la señala.
+ *
+ * Sin resaltarla, en una zona con varias cámaras cerca no se sabría cuál de los
+ * pines es la del panel desde el que se ha llegado.
+ */
+function destacarCamaraEnMapa(camId) {
+    const cam = cameras.find(c => c.id === camId);
+    if (!cam) return;
+
+    const punto = mapaPosicionDeCamara(cam);
+    if (!punto) {
+        // No situarla es lo normal al empezar, así que se explica en lugar de
+        // dejar el mapa en un sitio cualquiera sin decir por qué.
+        encuadrarEnLasCamaras();
+        mensajeDeMapa(IS_ADMIN
+            ? `«${cam.name}» todavía no está en el mapa. Pulsa «Editar mapa» y arrástrala.`
+            : `«${cam.name}» todavía no está situada en el mapa.`, true);
+        return;
+    }
+
+    MAPA.leaflet.setView(punto, Math.max(MAPA.leaflet.getZoom(),
+                                         MAPA_ZOOM_UNA_CAMARA));
+
+    const marcador = MAPA.marcadores[camId];
+    if (!marcador || !marcador.getElement()) return;
+    const el = marcador.getElement();
+    el.classList.add('destacado');
+    // Se retira sola: el resalte sirve para encontrarla al llegar, no para
+    // quedarse marcada mientras se usa el mapa.
+    setTimeout(() => el.classList.remove('destacado'), 2600);
 }
 
 // Zoom al abrir sobre una sola cámara: se ve la calle sin quedarse pegado al

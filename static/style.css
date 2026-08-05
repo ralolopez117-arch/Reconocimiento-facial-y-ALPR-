@@ -2760,3 +2760,61 @@ body:not(.can-export-recordings) .perm-export-recordings {
         display: none;
     }
 }
+
+/* ---- Ir del panel de vídeo al mapa ---- */
+
+/* En espejo del ajuste de imagen, que ocupa la esquina derecha. Aparece al
+   pasar por encima como el resto de mandos de la celda: en una sala de control
+   lo que importa es la imagen. */
+.cam-ubicacion {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+    z-index: 10;
+    width: 30px;
+    height: 30px;
+    padding: 5px;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border: 1px solid var(--surface-3);
+    border-radius: 6px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s, background 0.2s;
+
+    /* Este icono no cambia con el tema, a diferencia del resto: el panel de
+       vídeo se mantiene oscuro en los dos porque enmarca imagen, así que la
+       versión para fondo oscuro es siempre la correcta. */
+    background-image: url("img/nav-ubicacion-dark.png");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 18px 18px;
+}
+
+.video-cell:hover .cam-ubicacion {
+    opacity: 1;
+}
+
+.cam-ubicacion:hover {
+    background-color: rgba(0,0,0,0.75);
+}
+
+/* Al llegar desde un panel, el pin correspondiente late un momento: con varias
+   cámaras cerca, sin esto no se sabría cuál de los pines es. */
+.map-marcador-envoltorio.destacado .map-pin {
+    animation: latido-pin 0.85s ease-in-out 3;
+    z-index: 1000;
+}
+
+@keyframes latido-pin {
+    0%, 100% { transform: translate(-50%, -93.16%) scale(1); }
+    50%      { transform: translate(-50%, -93.16%) scale(1.35); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .map-marcador-envoltorio.destacado .map-pin {
+        animation: none;
+        filter: drop-shadow(0 0 6px var(--primary));
+    }
+}
