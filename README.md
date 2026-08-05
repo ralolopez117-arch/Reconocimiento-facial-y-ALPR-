@@ -1,8 +1,18 @@
-# Reconocimiento facial y ALPR
+# Argos
 
 Sistema de videovigilancia multi-cámara con detección y seguimiento de
 personas y vehículos, reconocimiento facial y lectura automática de
 matrículas (ALPR) en tiempo real.
+
+> **Antes de ponerlo en servicio**
+>
+> El usuario de fábrica es `Admin` / `1234`. **Cámbialo en cuanto entres**
+> (Configuración → Usuarios): una instalación que se deja con la contraseña
+> que figura aquí es una instalación abierta.
+>
+> El programa no cifra el tráfico. En la red local es aceptable; si lo publicas
+> fuera, ponlo detrás de un proxy con HTTPS y arranca con `COOKIE_SECURE=1`
+> para que la cookie de sesión no viaje en claro.
 
 ## Características
 
@@ -115,3 +125,23 @@ identificadores de sesión temporales (`s=...`) que caducan. Si el NVR
 reporta `Invalid data found when processing input`, comprueba que la URL
 de la cámara sea la ruta persistente del flujo MJPEG (sin parámetros de
 sesión) o usa la URL RTSP si el modelo la admite.
+
+
+## Licencia
+
+[AGPL-3.0](LICENSE).
+
+La elección no es libre: el programa usa **Ultralytics YOLO**, que se
+distribuye bajo AGPL-3.0, en el propio motor de detección y seguimiento
+(`streamer.py`, `model_cache.py`, `tracking_utils.py`). La interfaz de
+escritorio antigua usa además PyQt6, también copyleft. Publicar Argos bajo una
+licencia permisiva como MIT sería incompatible con esas dependencias.
+
+En la práctica, la AGPL permite lo que cabe esperar: descargar, ejecutar,
+estudiar y modificar el programa, y desplegarlo donde haga falta. Lo que exige
+es que quien distribuya una versión modificada —o la ofrezca como servicio a
+través de la red— publique también su código fuente.
+
+Quien necesite condiciones distintas puede adquirir una licencia comercial de
+Ultralytics y sustituir esa dependencia; el resto del código de este
+repositorio no lo impide.
