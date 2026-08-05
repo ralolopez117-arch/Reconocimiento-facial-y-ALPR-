@@ -660,6 +660,55 @@ body {
     filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.35));
 }
 
+/* Iconos de los botones de la barra, en sustitución de los emojis.
+   Son insignias circulares con su propio fondo oscuro, así que no heredan el
+   color del texto: no sirve teñirlas con currentColor como a los SVG. */
+/* 28 px, el mismo tamaño que el logotipo de al lado.
+   Son insignias con mucho detalle interno, rótulos incluidos: a 20 px la línea
+   se perdía y las cuatro se confundían en el mismo círculo turquesa, que es lo
+   contrario de lo que hace falta cuando la barra se estrecha y oculta las
+   etiquetas de texto. Crecer no cuesta nada, porque la altura de la barra la
+   fija la ficha de usuario (48 px), no estos botones. */
+.nav-icon {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+}
+
+/* Los botones pasan a ser caja flexible para que icono y etiqueta queden
+   centrados entre sí, y para que el hueco entre ambos desaparezca solo cuando
+   la etiqueta se oculta en pantallas estrechas.
+
+   El relleno vertical es menor que el de un .btn-secondary normal para
+   compensar el icono: así la barra mantiene su altura de siempre. */
+.top-nav .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 10px;
+    white-space: nowrap;
+}
+
+/* Las insignias están dibujadas en turquesa luminoso sobre fondo oscuro, que es
+   donde funcionan. Sobre la barra clara, las dos de trazo más fino
+   (reconocimiento facial y placas) quedaban casi invisibles.
+
+   Se les devuelve el fondo para el que fueron hechas: un disco oscuro justo
+   detrás. Encaja sin recortes porque los iconos ya son circulares y llegan al
+   borde del lienzo. */
+:root[data-theme="light"] .nav-icon {
+    background: #0f172a;
+    border-radius: 50%;
+}
+
+/* El mismo icono encabezando la ventana de cada función, donde antes había un
+   emoji. Aquí el título no es una caja flexible, así que el icono se asienta
+   en la línea base y hay que subirlo para centrarlo con el texto. */
+.titulo-icono {
+    vertical-align: -0.45em;
+    margin-right: 8px;
+}
+
 :root[data-theme="light"] .nav-logo {
     filter: drop-shadow(0 1px 3px rgba(15, 23, 42, 0.25));
 }
@@ -744,15 +793,20 @@ body.is-admin .admin-only {
 
 /* Igual que .admin-only, pero según los permisos de la cuenta en vez del rol.
    Ocultar el botón es solo comodidad: el servidor rechaza igualmente la
-   petición de quien no tenga el permiso. */
-.perm-view-recordings,
-.perm-export-recordings {
-    display: none !important;
-}
+   petición de quien no tenga el permiso.
 
-body.can-view-recordings .perm-view-recordings,
-body.can-export-recordings .perm-export-recordings {
-    display: revert !important;
+   Se oculta solo cuando FALTA el permiso, en lugar de ocultar siempre y
+   revelar después. Así, cuando el permiso está concedido no queda ninguna
+   regla de display en juego y el elemento conserva el suyo: con el patrón
+   contrario, el "display: revert" necesario para revelarlo pisaba el
+   inline-flex de los botones de la barra y descentraba su icono.
+
+   No hay riesgo de parpadeo al cargar, que es lo que justifica el patrón de
+   .admin-only: estas clases las escribe el servidor en el propio HTML, así
+   que están puestas desde el primer pintado. */
+body:not(.can-view-recordings) .perm-view-recordings,
+body:not(.can-export-recordings) .perm-export-recordings {
+    display: none !important;
 }
 
 .user-chip {
