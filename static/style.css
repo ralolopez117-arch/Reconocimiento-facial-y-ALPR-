@@ -2029,3 +2029,94 @@ body:not(.can-export-recordings) .perm-export-recordings {
     from { opacity: 1; transform: translateX(0); }
     to   { opacity: 0; transform: translateX(20px); }
 }
+
+
+/* ---- Iconos de las pestañas de configuración ---- */
+
+/* Mismo mecanismo que los iconos de la barra: fondo de un <span> vacío, para
+   que cada tema tenga su versión y solo se descargue la que aplica.
+
+   Grabaciones reutiliza el icono del juego de la barra en vez de duplicarlo;
+   de ahí que su data-icono empiece por nav- y no por tab-.
+
+   Se apila el icono sobre la etiqueta. Hasta ahora el emoji iba en línea y
+   acababa cayendo a su propia fila por falta de sitio, con un resultado
+   parecido pero accidental: según el ancho, unas pestañas partían y otras no.
+
+   El selector :has() limita esto a las pestañas que llevan icono. Los paneles
+   de rostros y placas comparten la clase .fr-tab y deben seguir como estaban. */
+.fr-tab:has(.tab-icono) {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+/* 22 px: por debajo de 20 se emborronan los de más detalle (la lupa de
+   detección y el reloj de sesión). No cuesta ancho, porque el de la pestaña lo
+   marca su texto; solo añade alto, y una vez. */
+.tab-icono {
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    display: inline-block;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+}
+
+:root[data-theme="dark"] .tab-icono[data-icono="tab-detection"] {
+    background-image: url("img/tab-detection-dark.png");
+}
+
+:root[data-theme="light"] .tab-icono[data-icono="tab-detection"] {
+    background-image: url("img/tab-detection-light.png");
+}
+
+:root[data-theme="dark"] .tab-icono[data-icono="tab-placas"] {
+    background-image: url("img/tab-placas-dark.png");
+}
+
+:root[data-theme="light"] .tab-icono[data-icono="tab-placas"] {
+    background-image: url("img/tab-placas-light.png");
+}
+
+:root[data-theme="dark"] .tab-icono[data-icono="tab-visualizacion"] {
+    background-image: url("img/tab-visualizacion-dark.png");
+}
+
+:root[data-theme="light"] .tab-icono[data-icono="tab-visualizacion"] {
+    background-image: url("img/tab-visualizacion-light.png");
+}
+
+:root[data-theme="dark"] .tab-icono[data-icono="tab-usuarios"] {
+    background-image: url("img/tab-usuarios-dark.png");
+}
+
+:root[data-theme="light"] .tab-icono[data-icono="tab-usuarios"] {
+    background-image: url("img/tab-usuarios-light.png");
+}
+
+:root[data-theme="dark"] .tab-icono[data-icono="nav-grabaciones"] {
+    background-image: url("img/nav-grabaciones-dark.png");
+}
+
+:root[data-theme="light"] .tab-icono[data-icono="nav-grabaciones"] {
+    background-image: url("img/nav-grabaciones-light.png");
+}
+
+:root[data-theme="dark"] .tab-icono[data-icono="tab-registro"] {
+    background-image: url("img/tab-registro-dark.png");
+}
+
+:root[data-theme="light"] .tab-icono[data-icono="tab-registro"] {
+    background-image: url("img/tab-registro-light.png");
+}
+
+:root[data-theme="dark"] .tab-icono[data-icono="tab-sesion"] {
+    background-image: url("img/tab-sesion-dark.png");
+}
+
+:root[data-theme="light"] .tab-icono[data-icono="tab-sesion"] {
+    background-image: url("img/tab-sesion-light.png");
+}

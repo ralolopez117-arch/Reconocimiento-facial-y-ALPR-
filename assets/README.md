@@ -49,3 +49,27 @@ regenerar los derivados y declarar las dos reglas correspondientes en
 **No bajar de 28 px en pantalla.** Es el tamaño para el que están ajustados y
 coincide con el del logotipo; la altura de la barra la fija la ficha de usuario,
 no estos botones, así que ese tamaño no desplaza nada.
+
+## Iconos de las pestañas de configuración
+
+Mismo mecanismo y misma receta, pero derivados con prefijo `tab-` y mostrados a
+22 px. Por debajo de 20 se emborronan los de más detalle (la lupa de detección
+y el reloj de sesión); subir no cuesta ancho, porque el de la pestaña lo marca
+su texto, solo añade alto una vez.
+
+| Original | Derivados en `static/img/` | Pestaña |
+|---|---|---|
+| `detection_*_theme.png` | `tab-detection-{dark,light}.png` | Detección |
+| `plate_*_theme.png` | `tab-placas-{dark,light}.png` | Placas |
+| `visualizacion_*_theme.png` | `tab-visualizacion-{dark,light}.png` | Visualización |
+| `users_*_theme.png` | `tab-usuarios-{dark,light}.png` | Usuarios |
+| — | `nav-grabaciones-{dark,light}.png` | Grabaciones |
+| `registro_*_theme.png` | `tab-registro-{dark,light}.png` | Registro |
+| `session_*_theme.png` | `tab-sesion-{dark,light}.png` | Sesión |
+
+Grabaciones **reutiliza** el icono del juego de la barra en lugar de duplicarlo;
+por eso su `data-icono` empieza por `nav-` y no por `tab-`.
+
+El icono se apila sobre la etiqueta. La regla se limita con `:has(.tab-icono)` a
+las pestañas que llevan icono: los paneles de rostros y placas comparten la
+clase `.fr-tab` y siguen como estaban.
