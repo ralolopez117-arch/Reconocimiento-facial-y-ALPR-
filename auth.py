@@ -227,7 +227,10 @@ THEME_DARK = "dark"
 THEME_LIGHT = "light"
 VALID_THEMES = (THEME_DARK, THEME_LIGHT)
 
-DEFAULT_PREFERENCES = {"theme": THEME_DARK}
+# Idioma de la interfaz. El valor por defecto es el de las plantillas.
+DEFAULT_LANGUAGE = "es"
+
+DEFAULT_PREFERENCES = {"theme": THEME_DARK, "language": DEFAULT_LANGUAGE}
 
 
 def init_preferences():
@@ -239,6 +242,13 @@ def init_preferences():
             theme TEXT NOT NULL DEFAULT 'dark'
         )
     ''')
+    # El idioma se añadió después: la columna puede faltar en instalaciones
+    # anteriores.
+    cursor.execute("PRAGMA table_info(user_preferences)")
+    columnas = {c["name"] for c in cursor.fetchall()}
+    if "language" not in columnas:
+        cursor.execute("ALTER TABLE user_preferences ADD COLUMN language TEXT "
+                       "NOT NULL DEFAULT '%s'" % DEFAULT_LANGUAGE)
     conn.commit()
     conn.close()
 
@@ -252,15 +262,17 @@ def get_preferences(user_id: int) -> dict:
     """
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT theme FROM user_preferences WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT theme, language FROM user_preferences WHERE user_id = ?",
+                   (user_id,))
     row = cursor.fetchone()
     conn.close()
     if row is None:
         return dict(DEFAULT_PREFERENCES)
-    return {**DEFAULT_PREFERENCES, "theme": row["theme"]}
+    return {**DEFAULT_PREFERENCES, "theme": row["theme"],
+            "language": row["language"] or DEFAULT_LANGUAGE}
 
 
-def save_preferences(user_id: int, theme: str):
+def save_preferences(user_id: int, theme: str, language: str = None):
     """
     Guarda las preferencias del usuario.
 
@@ -270,14 +282,28 @@ def save_preferences(user_id: int, theme: str):
     if theme not in VALID_THEMES:
         return f"Tema no válido: {theme}"
 
+    if language is None:
+        language = get_preferences(user_id)["language"]
+    # La validación del idioma vive en i18n, que es quien conoce la lista. Se
+    # importa aquí dentro para no crear una dependencia circular: i18n no
+    # necesita saber nada de usuarios.
+    import i18n
+    # Se exige que tenga catálogo, no solo que el código exista: guardar un
+    # idioma sin traducir dejaría el selector diciendo una cosa y la interfaz
+    # mostrando otra.
+    if language not in {i["codigo"] for i in i18n.idiomas_disponibles()}:
+        return f"Idioma no disponible: {language}"
+
     conn = get_connection()
     cursor = conn.cursor()
     # UPSERT: la fila puede no existir todavía si es la primera vez que el
     # usuario cambia algo de la personalización.
     cursor.execute('''
-        INSERT INTO user_preferences (user_id, theme) VALUES (?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET theme = excluded.theme
-    ''', (user_id, theme))
+        INSERT INTO user_preferences (user_id, theme, language) VALUES (?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            theme = excluded.theme,
+            language = excluded.language
+    ''', (user_id, theme, language))
     conn.commit()
     conn.close()
     return None

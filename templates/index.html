@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es" data-theme="{{ theme }}">
+<html lang="{{ language }}" dir="{{ 'rtl' if rtl else 'ltr' }}" data-theme="{{ theme }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -570,6 +570,20 @@
                     <span class="toggle-slider"></span>
                 </label>
 
+                <label class="settings-field-label" for="select-idioma"
+                       style="margin-top:16px;">Idioma de la interfaz</label>
+                <select id="select-idioma" class="settings-select">
+                    {% for i in idiomas %}
+                    <option value="{{ i.codigo }}"
+                            {{ 'selected' if i.codigo == language else '' }}>{{ i.nombre }}</option>
+                    {% endfor %}
+                </select>
+                <p class="settings-field-desc">
+                    Cambia el idioma de toda la interfaz. Se recuerda para tu usuario y no
+                    afecta a los demás. Lo que escriben las personas —nombres de cámara,
+                    de usuario o de rostros registrados— se queda como está.
+                </p>
+
                 <p class="settings-hint" style="margin-top: 20px;">
                     <strong>Superposiciones de video</strong> — qué se dibuja sobre la
                     imagen. Se aplican de inmediato en las cámaras activas y, al estar
@@ -937,6 +951,12 @@
     <!-- Audio element for alert -->
     <audio id="alert-sound" src="{{ url_for('static', filename='alert.ogg') }}" preload="auto"></audio>
 
+    <!-- Catálogo de traducción para las cadenas que arma el JavaScript. Va antes
+         que app.js para que T() esté disponible desde la primera línea. -->
+    <script>
+        window.CATALOGO_IDIOMA = {{ catalogo | tojson }};
+        window.IDIOMA_ACTUAL = {{ language | tojson }};
+    </script>
     <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
     <script src="{{ url_for('static', filename='app.js', v=2) }}"></script>
 </body>

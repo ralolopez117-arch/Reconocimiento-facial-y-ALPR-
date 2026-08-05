@@ -26,6 +26,7 @@ from ptz_control import get_ptz_controller
 import nvr_client
 import live_views
 import map_config
+import i18n
 
 app = Flask(__name__)
 app.secret_key = auth.get_secret_key()
@@ -153,7 +154,8 @@ def update_preferences():
     data = request.json or {}
     current = auth.get_preferences(session['user_id'])
     error = auth.save_preferences(session['user_id'],
-                                  data.get('theme', current['theme']))
+                                  data.get('theme', current['theme']),
+                                  data.get('language', current['language']))
     if error:
         return jsonify({'status': 'error', 'message': error}), 400
     return jsonify({'status': 'success', **auth.get_preferences(session['user_id'])})
@@ -347,9 +349,24 @@ def index():
     # El tema se inyecta en el HTML para que la página nazca ya con él y no
     # haya un destello del tema anterior mientras carga el JavaScript.
     prefs = auth.get_preferences(session['user_id'])
-    return render_template('index.html', user=user, is_admin=auth.is_admin(),
+    # Si el idioma guardado se quedó sin catálogo —porque se retiró el archivo—
+    # se cae al español en lugar de mostrar una interfaz que no corresponde con
+    # lo que anuncia el selector.
+    idioma = i18n.normalizar(prefs['language'])
+    ficha = i18n.info(idioma)
+    html = render_template('index.html', user=user, is_admin=auth.is_admin(),
                            permissions=sorted(auth.current_permissions()),
-                           theme=prefs['theme'])
+                           theme=prefs['theme'],
+                           language=idioma, rtl=ficha['rtl'],
+                           idiomas=i18n.idiomas_disponibles(),
+                           catalogo=i18n.catalogo(idioma))
+    # La traducción se aplica sobre el HTML ya montado, en el servidor.
+    #
+    # Hacerlo en el navegador sería más sencillo, pero la página se pintaría un
+    # instante en español antes de cambiar, y ese parpadeo se nota en cada
+    # carga. Traducir aquí también evita marcar a mano los cientos de textos de
+    # la plantilla, con el riesgo de romper el marcado.
+    return i18n.traducir_html(html, idioma)
 
 # ---------------------------------------------------------------------------
 # Servidor de grabaciones (NVR)

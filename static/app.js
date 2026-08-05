@@ -3,6 +3,37 @@
 // endpoint: esto es comodidad visual, no la barrera de seguridad.
 const IS_ADMIN = document.body.dataset.role === 'admin';
 
+// ---------------------------------------------------------------------------
+// Idioma
+//
+// La plantilla llega ya traducida desde el servidor. Aquí solo hace falta para
+// el texto que arma el propio JavaScript: avisos, confirmaciones y las tablas
+// que se construyen sobre la marcha.
+//
+// La clave es el texto en español, que es el idioma de partida: si falta la
+// traducción se lee en español, en lugar de mostrar un identificador en crudo.
+// ---------------------------------------------------------------------------
+const CATALOGO = window.CATALOGO_IDIOMA || {};
+
+/**
+ * Traduce una cadena.
+ *
+ * Acepta sustituciones con nombre para no partir las frases: el orden de las
+ * palabras cambia de un idioma a otro, y concatenar trozos daría resultados
+ * ilegibles fuera del español.
+ *
+ *     T('Vista «{nombre}» guardada', { nombre: 'Entradas' })
+ */
+function T(texto, valores) {
+    let salida = CATALOGO[texto] || texto;
+    if (valores) {
+        for (const clave of Object.keys(valores)) {
+            salida = salida.split(`{${clave}}`).join(valores[clave]);
+        }
+    }
+    return salida;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     // La cuadrícula se restaura DESPUÉS de conocer las cámaras: al colocar un
     // stream se busca su ficha para pintar la cabecera y los controles PTZ, y
@@ -27,6 +58,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Buscador de cámaras por nombre
     document.getElementById('camera-search-input').addEventListener('input', renderCameraList);
+
+    // Idioma de la interfaz
+    const selectorIdioma = document.getElementById('select-idioma');
+    if (selectorIdioma) selectorIdioma.addEventListener('change', cambiarIdioma);
 
     // Guardar la cuadrícula actual como una vista con nombre
     document.getElementById('vista-guardar').addEventListener('click', guardarVistaNueva);
@@ -4223,3 +4258,27 @@ document.addEventListener('DOMContentLoaded', () => {
             () => document.getElementById('mapcfg-overlay').classList.remove('active'));
     }
 });
+
+
+/**
+ * Cambia el idioma de la interfaz.
+ *
+ * Hace falta recargar: la plantilla se traduce en el servidor, que es lo que
+ * evita que la página se pinte un instante en español en cada carga. A cambio,
+ * el cambio de idioma cuesta una recarga, que ocurre una vez y no en cada
+ * visita.
+ */
+async function cambiarIdioma(e) {
+    const idioma = e.target.value;
+    const res = await fetch('/api/preferences', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ language: idioma }),
+    });
+    if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.message || T('No se pudo cambiar el idioma'));
+        return;
+    }
+    window.location.reload();
+}
