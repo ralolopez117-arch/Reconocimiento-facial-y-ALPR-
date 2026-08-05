@@ -31,6 +31,7 @@ import hashlib
 import hmac
 import os
 import secrets
+import threading
 import time
 
 from flask import session, jsonify, redirect, request, url_for
@@ -227,8 +228,13 @@ THEME_DARK = "dark"
 THEME_LIGHT = "light"
 VALID_THEMES = (THEME_DARK, THEME_LIGHT)
 
-# Idioma de la interfaz. El valor por defecto es el de las plantillas.
-DEFAULT_LANGUAGE = "es"
+# Idioma de la interfaz para una instalación nueva.
+#
+# Inglés y no español, aunque el español sea el idioma de partida del código:
+# es lo que más probabilidades tiene de entender quien arranque el programa por
+# primera vez sin configurar nada. Cada usuario puede cambiarlo en
+# Configuración → Visualización.
+DEFAULT_LANGUAGE = "en"
 
 DEFAULT_PREFERENCES = {"theme": THEME_DARK, "language": DEFAULT_LANGUAGE}
 
@@ -612,3 +618,104 @@ def permission_required(permiso: str):
             return view(*args, **kwargs)
         return wrapped
     return decorador
+
+
+# ---------------------------------------------------------------------------
+# Freno a la fuerza bruta
+#
+# El inicio de sesión no tenía ningún límite: se podían probar contraseñas sin
+# freno hasta acertar. Con una contraseña por defecto conocida y un sistema que
+# da acceso a cámaras en directo, eso es un problema serio.
+#
+# El recuento vive en memoria, no en la base de datos. Un reinicio del servidor
+# lo olvida, pero un atacante no puede provocar reinicios; y a cambio no se
+# escribe en disco en cada intento fallido, que es justo lo que un ataque por
+# fuerza bruta produciría a miles.
+# ---------------------------------------------------------------------------
+MAX_INTENTOS = 5
+
+# Cuánto se bloquea tras agotar los intentos. Cinco minutos frena un ataque
+# automatizado sin dejar fuera media jornada a quien se equivoque de teclado.
+BLOQUEO_SEGUNDOS = 300
+
+# Pasado este tiempo sin fallar, el contador se olvida: los errores sueltos de
+# alguien que teclea mal no deben acumularse durante días hasta bloquearlo.
+OLVIDO_SEGUNDOS = 900
+
+_intentos = {}
+_intentos_lock = threading.Lock()
+
+
+def _clave_intento(username, ip):
+    """
+    Se cuenta por usuario Y por origen.
+
+    Solo por usuario, cualquiera podría dejar bloqueada la cuenta del
+    administrador fallando aposta desde fuera. Solo por IP, un atacante
+    probaría un usuario distinto en cada intento para no acumular.
+    """
+    return ((username or "").strip().lower(), ip or "?")
+
+
+def intentos_restantes(username, ip):
+    """
+    Cuántos intentos quedan, o 0 si está bloqueado.
+
+    Returns:
+        (restantes, segundos_de_bloqueo)
+    """
+    clave = _clave_intento(username, ip)
+    ahora = time.time()
+    with _intentos_lock:
+        registro = _intentos.get(clave)
+        if registro is None:
+            return MAX_INTENTOS, 0
+        fallos, ultimo = registro
+        if ahora - ultimo > OLVIDO_SEGUNDOS:
+            _intentos.pop(clave, None)
+            return MAX_INTENTOS, 0
+        if fallos >= MAX_INTENTOS:
+            restante = BLOQUEO_SEGUNDOS - (ahora - ultimo)
+            if restante > 0:
+                return 0, int(restante) + 1
+            _intentos.pop(clave, None)
+            return MAX_INTENTOS, 0
+        return MAX_INTENTOS - fallos, 0
+
+
+def anotar_fallo(username, ip):
+    """Suma un intento fallido."""
+    clave = _clave_intento(username, ip)
+    ahora = time.time()
+    with _intentos_lock:
+        fallos, ultimo = _intentos.get(clave, (0, ahora))
+        if ahora - ultimo > OLVIDO_SEGUNDOS:
+            fallos = 0
+        _intentos[clave] = (fallos + 1, ahora)
+
+        # Sin esta limpieza, un ataque desde muchas direcciones distintas haría
+        # crecer el diccionario indefinidamente.
+        if len(_intentos) > 5000:
+            for k, (_, t) in list(_intentos.items()):
+                if ahora - t > OLVIDO_SEGUNDOS:
+                    _intentos.pop(k, None)
+
+
+def olvidar_fallos(username, ip):
+    """Limpia el recuento tras un acceso correcto."""
+    with _intentos_lock:
+        _intentos.pop(_clave_intento(username, ip), None)
+
+
+def usa_contrasena_por_defecto() -> bool:
+    """
+    True si el administrador inicial sigue con la contraseña de fábrica.
+
+    Sirve para avisarlo en la interfaz. Una instalación que se deja con la
+    contraseña que viene en la documentación es, a efectos prácticos, una
+    instalación abierta.
+    """
+    user = get_user_by_name(DEFAULT_ADMIN_USER)
+    if not user:
+        return False
+    return verify_password(DEFAULT_ADMIN_PASSWORD, user["password_hash"])

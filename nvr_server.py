@@ -21,6 +21,7 @@ configuración de la aplicación principal.
 
 import argparse
 import functools
+import hmac
 import os
 import re
 import sys
@@ -62,7 +63,10 @@ def token_required(view):
         esperado = load_config().get("api_token", "")
         recibido = (request.headers.get("X-NVR-Token")
                     or request.args.get("token", ""))
-        if not esperado or recibido != esperado:
+        # compare_digest tarda lo mismo acierte o falle. Con "!=" la
+        # comparación se corta en el primer carácter distinto, y midiendo esa
+        # diferencia se puede adivinar la clave carácter a carácter.
+        if not esperado or not hmac.compare_digest(recibido, esperado):
             return jsonify({"status": "error",
                             "message": "Clave de acceso no válida"}), 401
         return view(*args, **kwargs)

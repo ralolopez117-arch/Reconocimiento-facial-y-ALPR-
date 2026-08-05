@@ -35,6 +35,23 @@ app.secret_key = auth.get_secret_key()
 # caduca es la comprobación de actividad de streams, no el navegador.
 app.permanent_session_lifetime = datetime.timedelta(days=7)
 
+# SameSite=Lax impide que la cookie viaje en peticiones que nazcan de otro
+# sitio. Sin esto, una página cualquiera abierta en la misma pestaña podía
+# lanzar peticiones al programa aprovechando la sesión abierta: borrar cámaras,
+# crear usuarios o vaciar detecciones sin que el operador se enterase. Es la
+# defensa contra CSRF que faltaba, y la más barata.
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
+# La cookie no debe ser legible desde JavaScript: si alguna vez se cuela un
+# script ajeno en la página, no podrá llevarse la sesión.
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+
+# Marcarla como Secure exigiría HTTPS, y estas instalaciones suelen ir por HTTP
+# en la red local, donde la cookie no llegaría a enviarse nunca. Se deja al
+# despliegue: quien publique el programa detrás de HTTPS debería activarlo con
+# la variable de entorno.
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('COOKIE_SECURE') == '1' 
+
 auth.init_users()
 auth.init_preferences()
 audit.init_audit()
@@ -93,17 +110,33 @@ def login():
         return render_template('login.html')
 
     data = request.json or {}
-    user = auth.get_user_by_name(data.get('username', ''))
+    nombre = data.get('username', '')
+    origen = request.remote_addr or '?'
+
+    # Freno a la fuerza bruta antes de comprobar nada: si la cuenta está
+    # bloqueada no se llega siquiera a calcular el hash, que es la parte cara.
+    restantes, bloqueo = auth.intentos_restantes(nombre, origen)
+    if bloqueo:
+        audit.log(audit.SESSION_LOGIN_FAILED, target=nombre[:60],
+                  username=nombre or '?', role='',
+                  details={'motivo': 'bloqueado por intentos fallidos'})
+        return jsonify({
+            'status': 'error',
+            'message': f'Demasiados intentos fallidos. Inténtalo de nuevo en '
+                       f'{bloqueo // 60 + 1} minuto(s).'}), 429
+
+    user = auth.get_user_by_name(nombre)
     if user is None or not auth.verify_password(data.get('password', ''),
                                                 user['password_hash']):
+        auth.anotar_fallo(nombre, origen)
         # El mismo mensaje para usuario inexistente y contraseña incorrecta:
         # distinguirlos permitiría averiguar qué usuarios existen.
-        audit.log(audit.SESSION_LOGIN_FAILED,
-                  target=(data.get('username') or '')[:60],
-                  username=(data.get('username') or '?'), role='')
+        audit.log(audit.SESSION_LOGIN_FAILED, target=nombre[:60],
+                  username=nombre or '?', role='')
         return jsonify({'status': 'error',
                         'message': 'Usuario o contraseña incorrectos'}), 401
 
+    auth.olvidar_fallos(nombre, origen)
     auth.start_session(user)
     audit.log(audit.SESSION_LOGIN, target=user['username'])
     return jsonify({'status': 'success', 'role': user['role'],

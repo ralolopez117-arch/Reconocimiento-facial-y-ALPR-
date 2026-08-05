@@ -2818,3 +2818,28 @@ body:not(.can-export-recordings) .perm-export-recordings {
         filter: drop-shadow(0 0 6px var(--primary));
     }
 }
+
+/* ---- Marca ---- */
+
+/* El nombre es un nombre propio y no se traduce; el lema que lo acompaña sí,
+   y por eso van en elementos separados. */
+.marca {
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.marca-lema {
+    margin-left: 8px;
+    padding-left: 8px;
+    border-left: 1px solid var(--border-color);
+    font-size: 0.78em;
+    font-weight: 400;
+    color: var(--text-muted);
+}
+
+.marca-lema-login {
+    margin-top: 2px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+}
