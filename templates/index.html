@@ -7,6 +7,7 @@
     <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}" sizes="any">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/logo.png') }}">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body class="{{ 'is-admin' if is_admin else 'is-operator' }}
@@ -18,11 +19,11 @@
     <!-- Sidebar / Camera Panel -->
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
-            <h2>Mis Cámaras</h2>
+            <h2><span class="titulo-camaras" data-icono="nav-camaras"></span>Mis Cámaras</h2>
             <button id="add-camera-btn" class="btn-primary admin-only">+ Agregar</button>
         </div>
         <div class="camera-search">
-            <input type="text" id="camera-search-input" placeholder="🔍 Buscar cámara por nombre...">
+            <input type="text" id="camera-search-input" placeholder="🔍 Buscar por nombre o número...">
         </div>
         <ul class="camera-list" id="camera-list">
             <!-- Cameras injected via JS -->
@@ -51,6 +52,14 @@
             <img class="nav-logo" src="{{ url_for('static', filename='img/logo-64.png') }}"
                  alt="" width="28" height="28">
             <h1 style="font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Centro de Monitoreo Inteligente</h1>
+            <button id="open-map-btn" class="btn-secondary" title="Mapa de cámaras">
+                <span class="nav-icon nav-icon-svg" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M9 3 3 5.5v15L9 18l6 3 6-2.5v-15L15 6 9 3Z"/>
+                        <path d="M9 3v15M15 6v15"/>
+                    </svg>
+                </span><span class="nav-label">Mapa</span></button>
             <!-- Compact icon-only buttons for FR and ALPR -->
             <button id="open-fr-btn" class="btn-secondary" title="Reconocimiento Facial"><span class="nav-icon" data-icono="reconocimiento-facial"></span><span class="nav-label">Reconocimiento Facial</span></button>
             <button id="open-alpr-btn" class="btn-secondary" title="Placas (ALPR)"><span class="nav-icon" data-icono="alpr"></span><span class="nav-label">Placas (ALPR)</span></button>
@@ -104,14 +113,9 @@
             <label>Nombre:</label>
             <input type="text" id="modal-name" placeholder="Ej. Entrada Principal">
             
-            <label>Tipo:</label>
-            <select id="modal-type">
-                <option value="USB">USB</option>
-                <option value="IP">IP / Red</option>
-            </select>
-            
-            <label>Fuente (URL o Índice):</label>
-            <input type="text" id="modal-source" placeholder="Ej. 0 o rtsp://...">
+            <label>Fuente (IP-URL):</label>
+            <input type="text" id="modal-source"
+                   placeholder="Ej. rtsp://192.168.1.100:554/stream o http://.../video.mjpg">
 
             <hr style="border: none; border-top: 1px solid var(--border-color); margin: 15px 0;">
             <h4 style="margin-bottom: 10px; font-size: 0.9em; color: var(--primary);">Configuración ONVIF / PTZ</h4>
@@ -817,12 +821,130 @@
         </div>
     </div>
 
+
+    <!-- Mapa de cámaras -->
+    <div class="modal-overlay" id="map-overlay">
+        <div class="modal map-modal">
+            <div class="map-cabecera">
+                <h3><span class="titulo-camaras" data-icono="nav-camaras"></span>Mapa de cámaras</h3>
+
+                <div class="map-acciones">
+                    <span id="map-pista" class="map-pista">
+                        Doble clic sobre una cámara para verla</span>
+
+                    <!-- Solo el administrador puede colocar cámaras -->
+                    <button id="map-editar" class="btn-secondary admin-only"
+                            title="Colocar, mover o quitar cámaras del mapa">
+                        Editar mapa</button>
+                    <button id="map-config" class="btn-secondary admin-only"
+                            title="Elegir el fondo del mapa">Fondo</button>
+                    <button id="map-cerrar" class="modal-cerrar"
+                            title="Cerrar" aria-label="Cerrar">✕</button>
+                </div>
+            </div>
+
+            <div class="map-cuerpo">
+                <!-- Cámaras por colocar, solo en modo edición -->
+                <aside class="map-lateral" id="map-lateral">
+                    <h4>Arrastra al mapa</h4>
+                    <p class="map-lateral-ayuda">
+                        Suelta una cámara sobre el mapa para situarla. Las que ya están
+                        colocadas se pueden arrastrar para moverlas.</p>
+                    <ul class="map-camaras" id="map-camaras"></ul>
+
+                    <div class="map-manual">
+                        <h4>Colocar a mano</h4>
+                        <select id="map-manual-cam" class="settings-select"></select>
+                        <div class="map-manual-campos">
+                            <label>
+                                <span id="map-manual-etiqueta-x">Longitud</span>
+                                <input type="number" id="map-manual-x" step="any"
+                                       placeholder="-3.7038">
+                            </label>
+                            <label>
+                                <span id="map-manual-etiqueta-y">Latitud</span>
+                                <input type="number" id="map-manual-y" step="any"
+                                       placeholder="40.4168">
+                            </label>
+                        </div>
+                        <button id="map-manual-aplicar" class="btn-primary">Situar</button>
+                        <p class="map-manual-ayuda" id="map-manual-ayuda"></p>
+                    </div>
+                </aside>
+
+                <div class="map-lienzo" id="map-lienzo"></div>
+            </div>
+
+            <p class="map-msg" id="map-msg"></p>
+        </div>
+    </div>
+
+    <!-- Fondo del mapa (solo administrador) -->
+    <div class="modal-overlay" id="mapcfg-overlay">
+        <div class="modal" style="max-width: 520px;">
+            <h3>Fondo del mapa</h3>
+
+            <p class="settings-hint">
+                Elige un mapa de calles en línea o sube un plano propio: el croquis
+                del recinto, el plano del edificio o cualquier imagen.
+            </p>
+
+            <label class="toggle-row settings-toggle">
+                <span class="option-body">
+                    <strong>Usar un plano propio</strong>
+                    <small>En lugar de un mapa de calles. Las cámaras colocadas en
+                           cada uno se guardan por separado, así que puedes alternar
+                           sin perder nada.</small>
+                </span>
+                <input type="checkbox" id="mapcfg-modo-imagen">
+                <span class="toggle-slider"></span>
+            </label>
+
+            <div id="mapcfg-teselas">
+                <label class="settings-field-label" for="mapcfg-proveedor">Mapa de calles</label>
+                <select id="mapcfg-proveedor" class="settings-select"></select>
+
+                <label class="settings-field-label" for="mapcfg-url" style="margin-top:14px;">
+                    O un servidor de teselas propio</label>
+                <input type="text" id="mapcfg-url"
+                       placeholder="https://servidor-interno/tiles/{z}/{x}/{y}.png"
+                       style="width:100%; box-sizing:border-box; padding:9px 12px;
+                              background:var(--bg-card); border:1px solid var(--border-color);
+                              border-radius:6px; color:var(--text-color); outline:none;">
+                <p class="settings-field-desc">
+                    Déjalo vacío para usar el proveedor de arriba. Útil en redes sin
+                    salida a internet, donde las teselas las sirve un equipo local.
+                </p>
+
+                <label class="settings-field-label" for="mapcfg-atribucion" style="margin-top:10px;">
+                    Atribución</label>
+                <input type="text" id="mapcfg-atribucion" placeholder="Origen de las teselas"
+                       style="width:100%; box-sizing:border-box; padding:9px 12px;
+                              background:var(--bg-card); border:1px solid var(--border-color);
+                              border-radius:6px; color:var(--text-color); outline:none;">
+            </div>
+
+            <div id="mapcfg-imagen" style="display:none;">
+                <label class="settings-field-label">Imagen del plano</label>
+                <input type="file" id="mapcfg-archivo" accept=".png,.jpg,.jpeg,.webp">
+                <p class="settings-field-desc" id="mapcfg-imagen-actual"></p>
+            </div>
+
+            <div class="modal-actions">
+                <button id="mapcfg-cancelar" class="btn-secondary">Cancelar</button>
+                <button id="mapcfg-guardar" class="btn-primary">Guardar</button>
+            </div>
+            <p class="settings-msg" id="mapcfg-msg"></p>
+        </div>
+    </div>
+
     <!-- Toast Notification Container -->
     <div id="toast-container" class="toast-container"></div>
     
     <!-- Audio element for alert -->
     <audio id="alert-sound" src="{{ url_for('static', filename='alert.ogg') }}" preload="auto"></audio>
 
+    <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
     <script src="{{ url_for('static', filename='app.js', v=2) }}"></script>
 </body>
 </html>

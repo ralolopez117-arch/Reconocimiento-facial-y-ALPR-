@@ -54,6 +54,33 @@ ALIVE_GRACE = 20.0
 MAX_PARALLEL_PROBES = 6
 
 
+def _parece_video(tipo: str, datos: bytes) -> bool:
+    """
+    Decide si una respuesta HTTP trae vídeo, o es otra cosa con apariencia de éxito.
+
+    Hace falta porque algunas cámaras contestan 200 a una petición que no pueden
+    servir. Una Panasonic WebView con el identificador de sesión caducado
+    responde 200 y, como cuerpo, "Unknown Connection ID" en texto plano: hay
+    código correcto y hay bytes, así que comprobar solo eso la daba por viva
+    aunque no estuviera emitiendo nada.
+    """
+    tipo = (tipo or "").split(";")[0].strip().lower()
+
+    if tipo.startswith(("multipart/", "image/", "video/")):
+        return True
+    # Texto nunca es vídeo, por mucho que el código sea 200. Aquí caen las
+    # páginas de error, los avisos de sesión caducada y las pantallas de acceso.
+    if tipo.startswith(("text/", "application/json")):
+        return False
+
+    # Sin tipo, o con uno genérico como application/octet-stream, se mira el
+    # contenido: un JPEG empieza por FFD8, un flujo MJPEG por la línea
+    # separadora, y los contenedores tipo MP4 llevan "ftyp" al principio.
+    if datos[:2] == b"\xff\xd8" or datos[:2] == b"--":
+        return True
+    return b"ftyp" in datos[:32]
+
+
 def _probe_http(source: str) -> bool:
     """
     Comprueba una fuente HTTP/HTTPS pidiendo los primeros bytes.
@@ -69,9 +96,11 @@ def _probe_http(source: str) -> bool:
             return False
         # Que responda con cabeceras no basta: algunos equipos aceptan la
         # conexión y no envían nada. Se exige al menos un fragmento de datos.
-        for fragmento in respuesta.iter_content(chunk_size=1024):
-            return bool(fragmento)
-        return False
+        primero = next(respuesta.iter_content(chunk_size=1024), b"")
+        if not primero:
+            return False
+        # Y que lleguen bytes tampoco basta: pueden ser un mensaje de error.
+        return _parece_video(respuesta.headers.get("Content-Type"), primero)
     except requests.RequestException:
         return False
     finally:

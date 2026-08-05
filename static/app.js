@@ -107,11 +107,15 @@ const ETIQUETAS_ESTADO = {
     unknown: { texto: 'Comprobando…',  clase: 'unknown' },
 };
 
-function renderStatusDot(salud) {
+/**
+ * Estado de la cámara en palabras, para el tooltip de su ficha.
+ *
+ * El color del borde dice si está en servicio, pero no distingue "caída" de
+ * "aún no comprobada", ni cuándo se miró por última vez.
+ */
+function descripcionDeEstado(salud) {
     const info = ETIQUETAS_ESTADO[salud.status] || ETIQUETAS_ESTADO.unknown;
 
-    // Detalle en el tooltip: sin él, un punto gris no distingue "caída" de
-    // "aún no comprobada".
     let detalle = info.texto;
     if (salud.streaming) {
         detalle = 'En servicio · emitiendo ahora';
@@ -121,9 +125,7 @@ function renderStatusDot(salud) {
     if (salud.checked_seconds_ago != null) {
         detalle += ` · comprobada hace ${salud.checked_seconds_ago} s`;
     }
-
-    return `<span class="cam-status-dot ${info.clase}" title="${detalle}"
-                  role="img" aria-label="${info.texto}"></span>`;
+    return detalle;
 }
 
 async function fetchCameraStatus() {
@@ -145,8 +147,13 @@ function renderCameraList() {
 
     list.innerHTML = '';
 
+    // Se busca por nombre o por número. Escribir "3" encuentra la cámara 3
+    // sin tener que recordar cómo se llama; escribir "entr" encuentra las que
+    // lleven eso en el nombre.
     const visibles = filtro
-        ? cameras.filter(c => (c.name || '').toLowerCase().includes(filtro))
+        ? cameras.filter(c => (c.name || '').toLowerCase().includes(filtro)
+                           || String(c.numero || '') === filtro
+                           || `#${c.numero || ''}` === filtro)
         : cameras;
 
     if (visibles.length === 0) {
@@ -155,6 +162,7 @@ function renderCameraList() {
         vacio.textContent = filtro
             ? `Ninguna cámara coincide con "${filtro}"`
             : 'No hay cámaras registradas';
+
         list.appendChild(vacio);
         return;
     }
@@ -166,8 +174,13 @@ function renderCameraList() {
         li.ondragstart = (e) => e.dataTransfer.setData('text/plain', JSON.stringify(cam));
 
         const ptzBadge = cam.is_ptz ? '<span class="ptz-badge">PTZ</span>' : '';
+
+        // El estado se pinta en el borde de la ficha entera, no en un punto
+        // aparte: se ve de un vistazo y ahorra la altura que ocupaba.
         const salud = cameraStatus[cam.id] || { status: 'unknown' };
-        const punto = renderStatusDot(salud);
+        li.classList.add(`estado-${(ETIQUETAS_ESTADO[salud.status]
+                                    ? salud.status : 'unknown')}`);
+        li.title = descripcionDeEstado(salud);
         // Editar y eliminar solo para administradores. El operador ve la lista
         // y puede arrastrar cámaras a la cuadrícula, pero no modificarlas.
         const acciones = IS_ADMIN ? `
@@ -177,10 +190,13 @@ function renderCameraList() {
             </div>
         ` : '';
 
+        const numero = cam.numero
+            ? `<span class="cam-numero" title="Número de cámara">${cam.numero}</span>`
+            : '';
+
         li.innerHTML = `
             <div class="cam-info">
-                <h4>${punto}${cam.name} ${ptzBadge}</h4>
-                <span>${cam.type}</span>
+                <h4>${numero}${cam.name} ${ptzBadge}</h4>
             </div>
             ${acciones}
         `;
@@ -197,7 +213,6 @@ function openModal(id = null) {
         const cam = cameras.find(c => c.id === id);
         document.getElementById('modal-cam-id').value = cam.id;
         document.getElementById('modal-name').value = cam.name || "";
-        document.getElementById('modal-type').value = cam.type || "IP";
         document.getElementById('modal-source').value = cam.source || "";
         document.getElementById('modal-ip').value = cam.ip || "";
         document.getElementById('modal-onvif-port').value = cam.onvif_port || 80;
@@ -207,7 +222,6 @@ function openModal(id = null) {
     } else {
         document.getElementById('modal-cam-id').value = "";
         document.getElementById('modal-name').value = "";
-        document.getElementById('modal-type').value = "IP";
         document.getElementById('modal-source').value = "";
         document.getElementById('modal-ip').value = "";
         document.getElementById('modal-onvif-port').value = 80;
@@ -227,7 +241,10 @@ async function saveCamera() {
     const id = document.getElementById('modal-cam-id').value;
     const data = {
         name: document.getElementById('modal-name').value,
-        type: document.getElementById('modal-type').value,
+        // Ya no se dan de alta cámaras USB, así que el tipo es fijo. Se sigue
+        // enviando porque el resto del sistema lo espera, y las cámaras USB
+        // que ya estuvieran registradas siguen funcionando.
+        type: 'IP',
         source: document.getElementById('modal-source').value,
         ip: document.getElementById('modal-ip').value,
         onvif_port: document.getElementById('modal-onvif-port').value,
@@ -3505,3 +3522,463 @@ async function borrarVista(id, nombre) {
     await cargarVistas();
     mensajeDeVistas(`«${nombre}» eliminada`);
 }
+
+
+// ===========================================================================
+// Mapa de cámaras
+//
+// Dos clases de fondo, con la misma interacción encima:
+//
+//   Teselas   OpenStreetMap y equivalentes. Coordenadas geográficas reales.
+//   Imagen    Un plano que sube el administrador. Sin geografía, así que se usa
+//             el sistema de coordenadas plano de Leaflet (CRS.Simple) y las
+//             posiciones se guardan como fracción del ancho y del alto.
+//
+// Se guardan por separado, de modo que alternar entre un mapa de calles y un
+// plano no borra lo colocado en el otro.
+//
+// El operador mira y navega; el administrador además coloca, mueve y quita.
+// Igual que en el resto de la interfaz, ocultar los controles es comodidad: el
+// servidor vuelve a exigir rol de administrador en cada petición.
+// ===========================================================================
+
+const MAPA = {
+    leaflet: null,       // instancia de L.Map
+    capa: null,          // capa de teselas o superposición de imagen
+    marcadores: {},      // {camera_id: L.Marker}
+    ajustes: null,
+    editando: false,
+};
+
+function mapaEsImagen() {
+    return MAPA.ajustes && MAPA.ajustes.mode === 'image';
+}
+
+/**
+ * Convierte la posición guardada de una cámara en coordenadas de Leaflet.
+ *
+ * En modo imagen las fracciones se llevan a píxeles y se invierte la vertical:
+ * CRS.Simple crece hacia arriba, mientras que en una imagen la fila 0 es la de
+ * arriba. Sin invertir, las cámaras aparecerían reflejadas.
+ */
+function mapaPosicionDeCamara(cam) {
+    if (mapaEsImagen()) {
+        const p = cam.map_image;
+        if (!p) return null;
+        const alto = MAPA.ajustes.image_height || 1;
+        const ancho = MAPA.ajustes.image_width || 1;
+        return L.latLng(alto - p.y * alto, p.x * ancho);
+    }
+    const p = cam.map_geo;
+    return p ? L.latLng(p.lat, p.lng) : null;
+}
+
+/** Operación inversa: de coordenadas de Leaflet a lo que se guarda. */
+function mapaCoordenadasParaGuardar(latlng) {
+    if (mapaEsImagen()) {
+        const alto = MAPA.ajustes.image_height || 1;
+        const ancho = MAPA.ajustes.image_width || 1;
+        return {
+            x: Math.min(1, Math.max(0, latlng.lng / ancho)),
+            y: Math.min(1, Math.max(0, (alto - latlng.lat) / alto)),
+        };
+    }
+    return { x: latlng.lng, y: latlng.lat };
+}
+
+async function abrirMapa() {
+    document.getElementById('map-overlay').classList.add('active');
+    try {
+        MAPA.ajustes = await (await fetch('/api/map/settings')).json();
+    } catch (e) {
+        mensajeDeMapa('No se pudieron leer los ajustes del mapa', true);
+        return;
+    }
+    construirMapa();
+    dibujarMarcadores();
+    renderListaDelMapa();
+
+    // Leaflet mide el contenedor al crearse. Aquí acaba de hacerse visible, así
+    // que sin esto se queda con tamaño cero y solo pinta una esquina.
+    setTimeout(() => MAPA.leaflet && MAPA.leaflet.invalidateSize(), 60);
+}
+
+function construirMapa() {
+    const lienzo = document.getElementById('map-lienzo');
+
+    // Se rehace de cero al cambiar de fondo: reutilizar la instancia obligaría
+    // a cambiar el sistema de coordenadas en caliente, que Leaflet no admite.
+    if (MAPA.leaflet) {
+        MAPA.leaflet.remove();
+        MAPA.leaflet = null;
+        MAPA.marcadores = {};
+    }
+
+    if (mapaEsImagen() && MAPA.ajustes.image) {
+        const alto = MAPA.ajustes.image_height;
+        const ancho = MAPA.ajustes.image_width;
+        MAPA.leaflet = L.map(lienzo, {
+            crs: L.CRS.Simple,
+            minZoom: -4,
+            maxZoom: 4,
+            attributionControl: false,
+        });
+        const limites = [[0, 0], [alto, ancho]];
+        MAPA.capa = L.imageOverlay(`/static/maps/${MAPA.ajustes.image}`, limites)
+                     .addTo(MAPA.leaflet);
+        MAPA.leaflet.fitBounds(limites);
+        // Sin este tope se puede alejar la imagen hasta perderla de vista
+        MAPA.leaflet.setMaxBounds(L.latLngBounds(limites).pad(0.5));
+    } else {
+        MAPA.leaflet = L.map(lienzo).setView(
+            MAPA.ajustes.center || [40.4168, -3.7038], MAPA.ajustes.zoom || 6);
+        MAPA.capa = L.tileLayer(MAPA.ajustes.tile_url, {
+            attribution: MAPA.ajustes.attribution,
+            maxZoom: MAPA.ajustes.max_zoom || 19,
+        }).addTo(MAPA.leaflet);
+    }
+
+    // Soltar una cámara arrastrada desde la lista lateral
+    lienzo.addEventListener('dragover', e => {
+        if (MAPA.editando) e.preventDefault();
+    });
+    lienzo.addEventListener('drop', async e => {
+        if (!MAPA.editando) return;
+        e.preventDefault();
+        let cam;
+        try { cam = JSON.parse(e.dataTransfer.getData('text/plain')); } catch (_) { return; }
+        if (!cam || !cam.id) return;
+        const punto = MAPA.leaflet.mouseEventToLatLng(e);
+        await situarCamara(cam.id, punto);
+    });
+}
+
+function iconoDeCamara(cam, colocadaAhora) {
+    const salud = cameraStatus[cam.id] || { status: 'unknown' };
+    return L.divIcon({
+        className: 'map-marcador-envoltorio',
+        html: `<span class="map-marcador estado-${salud.status}">
+                   <span class="map-marcador-num">${cam.numero || ''}</span>
+                   <span class="map-marcador-nombre">${cam.name}</span>
+               </span>`,
+        iconSize: null,
+        iconAnchor: [10, 10],
+    });
+}
+
+function dibujarMarcadores() {
+    Object.values(MAPA.marcadores).forEach(m => m.remove());
+    MAPA.marcadores = {};
+
+    cameras.forEach(cam => {
+        const punto = mapaPosicionDeCamara(cam);
+        if (!punto) return;
+
+        const marcador = L.marker(punto, {
+            icon: iconoDeCamara(cam),
+            draggable: MAPA.editando,
+            title: `${cam.name} — doble clic para verla`,
+        }).addTo(MAPA.leaflet);
+
+        // Doble clic: llevarla a un panel de vídeo. Es la acción principal para
+        // el operador, y la única que tiene sin permisos de administrador.
+        marcador.on('dblclick', e => {
+            L.DomEvent.stop(e);        // si no, el mapa también hace zoom
+            mostrarCamaraDesdeMapa(cam);
+        });
+
+        marcador.on('dragend', async () => {
+            await situarCamara(cam.id, marcador.getLatLng(), true);
+        });
+
+        // Con el botón derecho se quita del mapa, igual que en la cuadrícula
+        marcador.on('contextmenu', async e => {
+            L.DomEvent.stop(e);
+            if (!MAPA.editando) return;
+            if (!confirm(`¿Quitar «${cam.name}» del mapa?\n\n`
+                         + 'La cámara sigue existiendo; solo deja de aparecer aquí.')) return;
+            await quitarCamaraDelMapa(cam.id);
+        });
+
+        MAPA.marcadores[cam.id] = marcador;
+    });
+}
+
+/**
+ * Lleva la cámara a un panel de vídeo.
+ *
+ * Se busca primero una celda libre, para no tapar lo que el usuario ya está
+ * mirando. Si están todas ocupadas se usa la primera, que es lo que pidió el
+ * planteamiento y evita quedarse sin poder abrir nada.
+ */
+function mostrarCamaraDesdeMapa(cam) {
+    const celdas = [...document.querySelectorAll('#grid-container .video-cell')];
+    if (!celdas.length) return;
+
+    // Si ya se está viendo, no se duplica: repetir el doble clic la sacaría en
+    // varios paneles a la vez, ocupando celdas para ver dos veces lo mismo.
+    const yaVisible = celdas.findIndex(c => {
+        const img = c.querySelector('img');
+        return img && img.src.includes(`/video_feed/${cam.id}`);
+    });
+    if (yaVisible !== -1) {
+        document.getElementById('map-overlay').classList.remove('active');
+        showToast(`${cam.name} ya se está viendo en el panel ${yaVisible + 1}`);
+        return;
+    }
+
+    let destino = celdas.find(c => !c.querySelector('img')) || celdas[0];
+    const indice = parseInt(destino.dataset.index);
+    const src = `/video_feed/${cam.id}`;
+
+    _placeCellStream(destino, src, cam);
+    streamState[indice] = { src, camId: cam.id };
+    guardarComposicionActual();
+
+    document.getElementById('map-overlay').classList.remove('active');
+    showToast(`${cam.name} en el panel ${indice + 1}`);
+}
+
+async function situarCamara(camId, latlng, esMovimiento = false) {
+    const { x, y } = mapaCoordenadasParaGuardar(latlng);
+    const res = await fetch(`/api/map/cameras/${camId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: MAPA.ajustes.mode, x, y }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { mensajeDeMapa(d.message || 'No se pudo situar la cámara', true); return; }
+
+    await fetchCameras();
+    dibujarMarcadores();
+    renderListaDelMapa();
+    if (!esMovimiento) mensajeDeMapa('Cámara situada');
+}
+
+async function quitarCamaraDelMapa(camId) {
+    const res = await fetch(
+        `/api/map/cameras/${camId}?mode=${encodeURIComponent(MAPA.ajustes.mode)}`,
+        { method: 'DELETE' });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { mensajeDeMapa(d.message || 'No se pudo quitar', true); return; }
+    await fetchCameras();
+    dibujarMarcadores();
+    renderListaDelMapa();
+    mensajeDeMapa('Cámara quitada del mapa');
+}
+
+/** Cámaras que todavía no están sobre el mapa, para arrastrarlas. */
+function renderListaDelMapa() {
+    const lista = document.getElementById('map-camaras');
+    const selector = document.getElementById('map-manual-cam');
+    if (!lista) return;
+
+    const sinColocar = cameras.filter(c => !mapaPosicionDeCamara(c));
+
+    lista.innerHTML = '';
+    if (!sinColocar.length) {
+        const li = document.createElement('li');
+        li.className = 'map-camaras-vacio';
+        li.textContent = 'Todas las cámaras están ya en el mapa.';
+        lista.appendChild(li);
+    } else {
+        sinColocar.forEach(cam => {
+            const li = document.createElement('li');
+            li.className = 'map-camara-item';
+            li.draggable = true;
+            li.innerHTML = `<span class="cam-numero">${cam.numero || ''}</span>${cam.name}`;
+            li.addEventListener('dragstart',
+                e => e.dataTransfer.setData('text/plain', JSON.stringify(cam)));
+            lista.appendChild(li);
+        });
+    }
+
+    // El desplegable del alta manual sí lista todas: sirve tanto para colocar
+    // una cámara nueva como para corregir las coordenadas de una ya situada.
+    if (selector) {
+        const elegida = selector.value;
+        selector.innerHTML = '';
+        cameras.forEach(cam => {
+            const o = document.createElement('option');
+            o.value = cam.id;
+            o.textContent = `${cam.numero ? cam.numero + ' · ' : ''}${cam.name}`;
+            selector.appendChild(o);
+        });
+        if (elegida) selector.value = elegida;
+    }
+}
+
+function alternarEdicionDelMapa() {
+    MAPA.editando = !MAPA.editando;
+    document.getElementById('map-overlay')
+            .classList.toggle('editando', MAPA.editando);
+    document.getElementById('map-editar').textContent =
+        MAPA.editando ? 'Terminar edición' : 'Editar mapa';
+    document.getElementById('map-pista').textContent = MAPA.editando
+        ? 'Arrastra cámaras al mapa · botón derecho sobre una para quitarla'
+        : 'Doble clic sobre una cámara para verla';
+
+    // Los marcadores solo se pueden arrastrar en edición, y eso se decide al
+    // crearlos, así que se rehacen. La lista lateral también: si algo cambió
+    // desde que se abrió el mapa, se quedaría mostrando cámaras ya colocadas.
+    dibujarMarcadores();
+    renderListaDelMapa();
+    actualizarEtiquetasManuales();
+}
+
+function mensajeDeMapa(texto, error = false) {
+    const msg = document.getElementById('map-msg');
+    if (!msg) return;
+    msg.textContent = texto;
+    msg.style.color = error ? '#f87171' : '#4ade80';
+    msg.classList.add('visible');
+    clearTimeout(mensajeDeMapa._t);
+    mensajeDeMapa._t = setTimeout(() => msg.classList.remove('visible'), 3000);
+}
+
+// ---- Colocar a mano ----
+
+function actualizarEtiquetasManuales() {
+    const imagen = mapaEsImagen();
+    document.getElementById('map-manual-etiqueta-x').textContent =
+        imagen ? 'X (0 a 1)' : 'Longitud';
+    document.getElementById('map-manual-etiqueta-y').textContent =
+        imagen ? 'Y (0 a 1)' : 'Latitud';
+    document.getElementById('map-manual-ayuda').textContent = imagen
+        ? 'Fracción del ancho y del alto de la imagen: 0,5 y 0,5 es el centro.'
+        : 'Grados decimales. Se pueden copiar de cualquier mapa.';
+    document.getElementById('map-manual-x').placeholder = imagen ? '0.5' : '-3.7038';
+    document.getElementById('map-manual-y').placeholder = imagen ? '0.5' : '40.4168';
+}
+
+async function situarCamaraAMano() {
+    const camId = document.getElementById('map-manual-cam').value;
+    const x = parseFloat(document.getElementById('map-manual-x').value);
+    const y = parseFloat(document.getElementById('map-manual-y').value);
+    if (!camId || Number.isNaN(x) || Number.isNaN(y)) {
+        mensajeDeMapa('Indica la cámara y las dos coordenadas', true);
+        return;
+    }
+
+    const res = await fetch(`/api/map/cameras/${camId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: MAPA.ajustes.mode, x, y }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { mensajeDeMapa(d.message || 'No se pudo situar', true); return; }
+
+    await fetchCameras();
+    dibujarMarcadores();
+    renderListaDelMapa();
+    const marcador = MAPA.marcadores[camId];
+    if (marcador) MAPA.leaflet.panTo(marcador.getLatLng());
+    mensajeDeMapa('Cámara situada');
+}
+
+// ---- Fondo del mapa ----
+
+function abrirAjustesDelMapa() {
+    const a = MAPA.ajustes || {};
+    const selector = document.getElementById('mapcfg-proveedor');
+    selector.innerHTML = '';
+    (a.providers || []).forEach(p => {
+        const o = document.createElement('option');
+        o.value = p.key;
+        o.textContent = p.name;
+        selector.appendChild(o);
+    });
+    selector.value = a.provider || 'osm';
+
+    document.getElementById('mapcfg-url').value = a.custom_url || '';
+    document.getElementById('mapcfg-atribucion').value = a.custom_attribution || '';
+    document.getElementById('mapcfg-modo-imagen').checked = a.mode === 'image';
+    document.getElementById('mapcfg-imagen-actual').textContent = a.image
+        ? `Plano actual: ${a.image} (${a.image_width}×${a.image_height})`
+        : 'Todavía no hay ningún plano subido.';
+    alternarCamposDeFondo();
+    document.getElementById('mapcfg-overlay').classList.add('active');
+}
+
+function alternarCamposDeFondo() {
+    const imagen = document.getElementById('mapcfg-modo-imagen').checked;
+    document.getElementById('mapcfg-teselas').style.display = imagen ? 'none' : 'block';
+    document.getElementById('mapcfg-imagen').style.display = imagen ? 'block' : 'none';
+}
+
+async function guardarAjustesDelMapa() {
+    const imagen = document.getElementById('mapcfg-modo-imagen').checked;
+    const msg = document.getElementById('mapcfg-msg');
+    const mostrar = (t, err) => {
+        msg.textContent = t;
+        msg.style.color = err ? '#f87171' : '#4ade80';
+        msg.classList.add('visible');
+        clearTimeout(guardarAjustesDelMapa._t);
+        guardarAjustesDelMapa._t = setTimeout(() => msg.classList.remove('visible'), 4000);
+    };
+
+    if (imagen) {
+        const archivo = document.getElementById('mapcfg-archivo').files[0];
+        if (archivo) {
+            const cuerpo = new FormData();
+            cuerpo.append('image', archivo);
+            const res = await fetch('/api/map/image', { method: 'POST', body: cuerpo });
+            const d = await res.json().catch(() => ({}));
+            if (!res.ok) { mostrar(d.message || 'No se pudo subir el plano', true); return; }
+            MAPA.ajustes = d;
+        } else if (!MAPA.ajustes.image) {
+            mostrar('Elige una imagen para el plano', true);
+            return;
+        } else {
+            const res = await fetch('/api/map/settings', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mode: 'image' }),
+            });
+            const d = await res.json().catch(() => ({}));
+            if (!res.ok) { mostrar(d.message || 'No se pudo guardar', true); return; }
+            MAPA.ajustes = d;
+        }
+    } else {
+        const res = await fetch('/api/map/settings', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                mode: 'tiles',
+                provider: document.getElementById('mapcfg-proveedor').value,
+                custom_url: document.getElementById('mapcfg-url').value,
+                custom_attribution: document.getElementById('mapcfg-atribucion').value,
+            }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) { mostrar(d.message || 'No se pudo guardar', true); return; }
+        MAPA.ajustes = d;
+    }
+
+    document.getElementById('mapcfg-overlay').classList.remove('active');
+    construirMapa();
+    dibujarMarcadores();
+    renderListaDelMapa();
+    actualizarEtiquetasManuales();
+    setTimeout(() => MAPA.leaflet && MAPA.leaflet.invalidateSize(), 60);
+    mensajeDeMapa('Fondo del mapa actualizado');
+}
+
+// ---- Conexiones ----
+
+document.addEventListener('DOMContentLoaded', () => {
+    const abrir = document.getElementById('open-map-btn');
+    if (!abrir) return;
+
+    abrir.addEventListener('click', abrirMapa);
+    document.getElementById('map-cerrar').addEventListener('click',
+        () => document.getElementById('map-overlay').classList.remove('active'));
+
+    if (IS_ADMIN) {
+        document.getElementById('map-editar').addEventListener('click', alternarEdicionDelMapa);
+        document.getElementById('map-config').addEventListener('click', abrirAjustesDelMapa);
+        document.getElementById('map-manual-aplicar').addEventListener('click', situarCamaraAMano);
+        document.getElementById('mapcfg-modo-imagen').addEventListener('change', alternarCamposDeFondo);
+        document.getElementById('mapcfg-guardar').addEventListener('click', guardarAjustesDelMapa);
+        document.getElementById('mapcfg-cancelar').addEventListener('click',
+            () => document.getElementById('mapcfg-overlay').classList.remove('active'));
+    }
+});

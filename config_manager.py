@@ -13,9 +13,15 @@ programa arranca sin pasos previos y las cámaras se añaden desde la interfaz.
 import copy
 import json
 import os
+import threading
+import tempfile
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
+
+# El servidor atiende peticiones en paralelo y toda la configuración vive en un
+# único archivo, así que dos escrituras a la vez podrían entrelazarse.
+_CERROJO = threading.RLock()
 
 # ---------------------------------------------------------------------------
 # Valores por defecto
@@ -102,14 +108,83 @@ def load_config():
     return data
 
 
+# ---------------------------------------------------------------------------
+# Numeración visible de las cámaras
+#
+# Cada cámara tiene un identificador interno (UUID) del que dependen las
+# grabaciones, la configuración del NVR y las vistas guardadas: ese no cambia
+# nunca. El número de aquí es solo para las personas, para poder referirse a
+# una cámara o buscarla sin teclear su nombre completo.
+# ---------------------------------------------------------------------------
+def siguiente_numero(camaras):
+    """
+    El número libre más bajo.
+
+    Se reaprovechan los huecos que dejan las cámaras eliminadas en vez de
+    seguir subiendo: en una instalación de diez cámaras es más cómodo teclear
+    "3" que "27" solo porque antes hubo veintiséis.
+    """
+    usados = {c.get("numero") for c in camaras
+              if isinstance(c.get("numero"), int)}
+    n = 1
+    while n in usados:
+        n += 1
+    return n
+
+
+def asegurar_numeros(config) -> bool:
+    """
+    Da número a las cámaras que todavía no lo tengan.
+
+    Sirve para las que vienen de una versión anterior a esta numeración. Se
+    asignan por orden de aparición, de modo que la lista queda numerada como se
+    ve en pantalla.
+
+    Returns:
+        True si hubo algún cambio, para que quien llame decida si guardar.
+    """
+    camaras = config.get("cameras", [])
+    cambios = False
+    for c in camaras:
+        if not isinstance(c.get("numero"), int) or c["numero"] < 1:
+            c["numero"] = siguiente_numero(camaras)
+            cambios = True
+    return cambios
+
+
 def save_config(config):
-    try:
-        # ensure_ascii=False mantiene legibles los nombres con tildes o eñes
-        # en lugar de escaparlos como á.
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=4, ensure_ascii=False)
-    except Exception as e:
-        print(f"Error saving config: {e}")
+    """
+    Escribe la configuración de forma atómica.
+
+    Se vuelca a un archivo temporal en la misma carpeta y se reemplaza de golpe
+    con os.replace, que es atómico tanto en Windows como en POSIX. Escribiendo
+    directamente sobre config.json, un corte de luz o un fallo a media escritura
+    dejaba el archivo truncado, y con él todas las cámaras dadas de alta.
+
+    El cerrojo evita además que dos peticiones simultáneas se pisen al escribir.
+    """
+    with _CERROJO:
+        temporal = None
+        try:
+            carpeta = os.path.dirname(CONFIG_FILE) or "."
+            descriptor, temporal = tempfile.mkstemp(
+                dir=carpeta, prefix=".config-", suffix=".tmp")
+            # ensure_ascii=False mantiene legibles los nombres con tildes o eñes
+            # en lugar de escaparlos como á.
+            with os.fdopen(descriptor, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=4, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temporal, CONFIG_FILE)
+            temporal = None
+        except Exception as e:
+            print(f"Error saving config: {e}")
+        finally:
+            if temporal and os.path.exists(temporal):
+                try:
+                    os.remove(temporal)
+                except OSError:
+                    pass
 
 def get_display_settings():
     config = load_config()

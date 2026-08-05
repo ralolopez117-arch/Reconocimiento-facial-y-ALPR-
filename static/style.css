@@ -128,6 +128,33 @@ body {
     padding: 0;
 }
 
+/* El título lleva delante el icono de cámara, con su versión por tema, igual
+   que los de la barra superior. */
+.sidebar-header h2 {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 1.25rem;
+}
+
+.titulo-camaras {
+    width: 26px;
+    height: 26px;
+    flex-shrink: 0;
+    display: inline-block;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+}
+
+:root[data-theme="dark"] .titulo-camaras {
+    background-image: url("img/nav-camaras-dark.png");
+}
+
+:root[data-theme="light"] .titulo-camaras {
+    background-image: url("img/nav-camaras-light.png");
+}
+
 .sidebar-header {
     padding: 20px;
     border-bottom: 1px solid var(--border-color);
@@ -177,8 +204,10 @@ body {
 .camera-item {
     background: var(--surface-1);
     border: 1px solid var(--border-color);
-    margin-bottom: 8px;
-    padding: 12px;
+    margin-bottom: 6px;
+    /* Relleno ajustado a una sola línea: al quitar la etiqueta de tipo que iba
+       debajo del nombre, la ficha pasa de dos líneas a una. */
+    padding: 9px 12px;
     border-radius: 8px;
     cursor: grab;
     display: flex;
@@ -198,18 +227,6 @@ body {
 
 .cam-info h4 {
     font-size: 14px;
-    margin-bottom: 4px;
-}
-
-/* Solo el hijo directo: es la etiqueta de tipo (IP / USB). Sin el ">" también
-   alcanzaba a los <span> anidados en el <h4> — el punto de estado y la insignia
-   PTZ — imponiéndoles su relleno y su fondo. */
-.cam-info > span {
-    font-size: 12px;
-    color: var(--text-muted);
-    background: var(--surface-sunken);
-    padding: 2px 6px;
-    border-radius: 4px;
 }
 
 .cam-actions button {
@@ -859,52 +876,47 @@ body:not(.can-export-recordings) .perm-export-recordings {
     color: var(--primary);
 }
 
-/* Indicador de estado al inicio del nombre de la cámara */
-.cam-status-dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    margin-right: 7px;
-    border-radius: 50%;
-    /* Sin esto el punto se alinea con la base del texto y queda bajo */
-    vertical-align: middle;
-    position: relative;
-    top: -1px;
-    flex-shrink: 0;
-    background: var(--text-muted);
-    transition: background 0.3s, box-shadow 0.3s;
+/* ---- Estado de la cámara ----
+
+   El estado se pinta en el borde de la ficha entera, en lugar de en un punto
+   delante del nombre. Se lee de un vistazo desde más lejos y no gasta altura,
+   que es justo lo que escasea en una lista larga. */
+
+.camera-item.estado-online {
+    border-color: #22c55e;
+    /* Franja a la izquierda: el borde fino solo ya distingue el estado, pero
+       de refilón cuesta apreciarlo sobre el fondo del panel. */
+    box-shadow: inset 3px 0 0 #22c55e;
 }
 
-.cam-status-dot.online {
-    background: #22c55e;
-    /* Halo tenue: ayuda a distinguirlo de un gris apagado de un vistazo */
-    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
-}
-
-.cam-status-dot.offline {
-    background: #64748b;
-    box-shadow: none;
+.camera-item.estado-offline {
+    border-color: #ef4444;
+    box-shadow: inset 3px 0 0 #ef4444;
+    /* Una cámara caída se puede seguir arrastrando, pero conviene que se note
+       que no va a dar imagen. */
+    opacity: 0.72;
 }
 
 /* Aún sin comprobar: late despacio para indicar que hay algo en curso, en
    lugar de parecer una cámara caída. */
-.cam-status-dot.unknown {
-    background: #94a3b8;
+.camera-item.estado-unknown {
+    border-color: var(--border-color);
+    box-shadow: inset 3px 0 0 var(--text-muted);
     animation: latido-estado 1.6s ease-in-out infinite;
 }
 
 @keyframes latido-estado {
-    0%, 100% { opacity: 0.35; }
-    50%      { opacity: 0.9; }
+    0%, 100% { border-left-color: var(--text-muted); }
+    50%      { border-left-color: var(--surface-4); }
 }
 
-/* Quien prefiera no ver animaciones recibe un punto estático legible */
+/* Quien prefiera no ver animaciones recibe una ficha estática legible */
 @media (prefers-reduced-motion: reduce) {
-    .cam-status-dot.unknown {
-        animation: none;
-        opacity: 0.6;
-    }
+    .camera-item.estado-unknown { animation: none; }
 }
+
+/* El color no puede ser la única señal: quien no distinga rojo de verde
+   necesita otra pista, y el tooltip de la ficha da el estado en palabras. */
 
 /* Buscador de cámaras en la barra lateral */
 .camera-search {
@@ -2328,4 +2340,285 @@ body:not(.can-export-recordings) .perm-export-recordings {
 
 .vistas-msg.visible {
     opacity: 1;
+}
+
+/* Número visible de la cámara, delante de su nombre. Es distinto del
+   identificador interno: sirve para referirse a una cámara de palabra o para
+   buscarla sin teclear el nombre entero. */
+.cam-numero {
+    display: inline-block;
+    min-width: 20px;
+    padding: 1px 5px;
+    margin-right: 7px;
+    border-radius: 4px;
+    background: var(--surface-sunken);
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    vertical-align: 1px;
+}
+
+
+/* ===========================================================================
+   Mapa de cámaras
+   =========================================================================== */
+
+/* El botón del mapa lleva un SVG en lugar de una imagen por tema: al dibujarse
+   con currentColor sigue al color del texto y no hace falta una versión por
+   tema, a diferencia de los iconos que son ilustraciones. */
+.nav-icon-svg svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.map-modal {
+    width: min(1200px, 94vw);
+    height: min(840px, 90vh);
+    max-width: none;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    overflow: hidden;
+}
+
+.map-cabecera {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.map-cabecera h3 {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin: 0;
+}
+
+.map-acciones {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.map-pista {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-right: 4px;
+}
+
+.modal-cerrar {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 6px;
+}
+
+.modal-cerrar:hover {
+    background: var(--surface-3);
+    color: var(--text-main);
+}
+
+.map-cuerpo {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+}
+
+/* El panel de cámaras solo hace falta al editar: fuera de ese modo ocuparía
+   un tercio de la ventana sin que se pueda hacer nada con él. */
+.map-lateral {
+    display: none;
+    width: 260px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border-color);
+    padding: 14px;
+    overflow-y: auto;
+}
+
+#map-overlay.editando .map-lateral {
+    display: block;
+}
+
+.map-lateral h4 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+.map-lateral-ayuda,
+.map-manual-ayuda {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin-bottom: 10px;
+}
+
+.map-camaras {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-bottom: 18px;
+}
+
+.map-camara-item {
+    background: var(--surface-1);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 7px 9px;
+    font-size: 13px;
+    cursor: grab;
+    display: flex;
+    align-items: center;
+}
+
+.map-camara-item:hover {
+    background: var(--surface-3);
+}
+
+.map-camara-item:active {
+    cursor: grabbing;
+}
+
+.map-camaras-vacio {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.map-manual {
+    border-top: 1px solid var(--border-color);
+    padding-top: 14px;
+}
+
+.map-manual-campos {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.map-manual-campos label {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.map-manual-campos input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 7px 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    color: var(--text-color);
+    outline: none;
+    font-size: 12px;
+}
+
+.map-lienzo {
+    flex: 1;
+    min-width: 0;
+
+    /* Leaflet mide el contenedor al crearse, así que necesita alto propio y no
+       heredado de un flex sin resolver. */
+    height: 100%;
+    background: var(--surface-sunken);
+}
+
+/* Leaflet dibuja su propio fondo en tema claro; en oscuro conviene atenuar el
+   marco para que no destaque más que el vídeo. */
+.map-lienzo .leaflet-container {
+    height: 100%;
+    background: var(--surface-sunken);
+    font-family: inherit;
+}
+
+/* ---- Marcadores ---- */
+
+.map-marcador-envoltorio {
+    background: none;
+    border: none;
+}
+
+.map-marcador {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px 3px 4px;
+    border-radius: 999px;
+    background: var(--modal-bg);
+    border: 2px solid var(--text-muted);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    white-space: nowrap;
+    font-size: 11px;
+    color: var(--text-main);
+    cursor: pointer;
+    transition: transform 0.15s;
+}
+
+.map-marcador:hover {
+    transform: scale(1.06);
+}
+
+/* Mismo código de color que la lista de cámaras: verde en servicio, rojo
+   caída, gris sin comprobar. */
+.map-marcador.estado-online  { border-color: #22c55e; }
+.map-marcador.estado-offline { border-color: #ef4444; opacity: 0.8; }
+
+.map-marcador-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--surface-sunken);
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.map-marcador-nombre {
+    font-weight: 600;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.map-msg {
+    font-size: 12px;
+    padding: 0 18px 10px;
+    min-height: 0;
+    opacity: 0;
+    transition: opacity 0.2s;
+    flex-shrink: 0;
+}
+
+.map-msg.visible {
+    opacity: 1;
+}
+
+/* En pantallas estrechas el panel lateral se lleva demasiado sitio del mapa */
+@media (max-width: 820px) {
+    #map-overlay.editando .map-lateral {
+        display: none;
+    }
 }

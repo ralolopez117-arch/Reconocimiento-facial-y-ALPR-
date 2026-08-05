@@ -61,6 +61,10 @@ DETECTIONS_PLATES_CLEARED = "detections.plates_cleared"
 DETECTIONS_FACES_CLEARED = "detections.faces_cleared"
 DETECTIONS_ALERTS_CLEARED = "detections.alerts_cleared"
 
+MAP_SETTINGS = "map.settings"
+MAP_CAMERA_PLACED = "map.camera_placed"
+MAP_CAMERA_REMOVED = "map.camera_removed"
+
 NVR_SETTINGS = "nvr.settings"
 VIDEO_EXPORTED = "nvr.exported"
 NVR_CAMERAS = "nvr.cameras"
@@ -95,6 +99,9 @@ ACTION_LABELS = {
     DETECTIONS_PLATES_CLEARED: "Detecciones de placas borradas",
     DETECTIONS_FACES_CLEARED: "Detecciones de rostros borradas",
     DETECTIONS_ALERTS_CLEARED: "Alertas de placas borradas",
+    MAP_SETTINGS: "Ajustes del mapa",
+    MAP_CAMERA_PLACED: "Cámara situada en el mapa",
+    MAP_CAMERA_REMOVED: "Cámara quitada del mapa",
     NVR_SETTINGS: "Servidor de grabaciones",
     VIDEO_EXPORTED: "Vídeo exportado",
     NVR_CAMERAS: "Cámaras en grabación",

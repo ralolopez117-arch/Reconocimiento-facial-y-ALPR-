@@ -1,4 +1,6 @@
 import datetime
+import os
+import time
 import uuid
 from flask import (Flask, render_template, Response, request, jsonify,
                    redirect, session, url_for)
@@ -6,7 +8,8 @@ from config_manager import (load_config, save_config, get_display_settings,
                             save_display_settings, get_detection_mode,
                             save_detection_mode, get_alpr_settings,
                             save_alpr_settings, get_security_settings,
-                            save_security_settings)
+                            save_security_settings, siguiente_numero,
+                            asegurar_numeros)
 import auth
 from auth import login_required, admin_required, permission_required
 import audit
@@ -22,6 +25,7 @@ from analysis_queue import analysis_queue
 from ptz_control import get_ptz_controller
 import nvr_client
 import live_views
+import map_config
 
 app = Flask(__name__)
 app.secret_key = auth.get_secret_key()
@@ -34,6 +38,13 @@ auth.init_users()
 auth.init_preferences()
 audit.init_audit()
 live_views.init_live_views()
+
+# Numeración visible de las cámaras. Se rellena una sola vez, al arrancar, para
+# las que vengan de una versión anterior a esta numeración.
+_config_arranque = load_config()
+if asegurar_numeros(_config_arranque):
+    save_config(_config_arranque)
+    print(f"[Config] Numeradas {len(_config_arranque.get('cameras', []))} cámara(s)")
 
 # Start background processor manager
 background_manager.start()
@@ -158,6 +169,118 @@ def update_preferences():
 def _ids_de_camaras():
     """Identificadores que existen ahora mismo, para descartar los obsoletos."""
     return {c['id'] for c in load_config().get('cameras', [])}
+
+# ---------------------------------------------------------------------------
+# Mapa
+#
+# Ver el mapa y sus cámaras es para cualquiera; colocarlas o cambiar el
+# proveedor es cosa del administrador.
+# ---------------------------------------------------------------------------
+@app.route('/api/map/settings', methods=['GET'])
+@login_required
+def get_map_settings():
+    return jsonify(map_config.get_settings())
+
+@app.route('/api/map/settings', methods=['PUT'])
+@admin_required
+def update_map_settings():
+    datos = request.json or {}
+    error = map_config.save_settings(datos)
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+    ajustes = map_config.get_settings()
+    audit.log(audit.MAP_SETTINGS,
+              target=ajustes['image'] if ajustes['mode'] == 'image' else ajustes['provider'],
+              details={'modo': ajustes['mode']})
+    return jsonify({'status': 'success', **ajustes})
+
+@app.route('/api/map/image', methods=['POST'])
+@admin_required
+def upload_map_image():
+    """
+    Sube el plano propio: un croquis del recinto o el plano del edificio.
+
+    El nombre del archivo lo decide el servidor, a partir de una marca de
+    tiempo. Nunca se reutiliza el que llega del navegador: podría traer barras
+    o "..", y escribiría fuera de la carpeta prevista.
+    """
+    archivo = request.files.get('image')
+    if archivo is None or not archivo.filename:
+        return jsonify({'status': 'error', 'message': 'No se recibió ninguna imagen'}), 400
+
+    extension = os.path.splitext(archivo.filename)[1].lower()
+    if extension not in map_config.EXTENSIONES_IMAGEN:
+        return jsonify({'status': 'error',
+                        'message': 'Formato no admitido. Usa PNG, JPG o WEBP'}), 400
+
+    datos = archivo.read()
+    if len(datos) > map_config.MAX_IMAGEN_BYTES:
+        return jsonify({'status': 'error',
+                        'message': f'La imagen pasa de '
+                                   f'{map_config.MAX_IMAGEN_BYTES // (1024*1024)} MB'}), 400
+
+    # Se abre con Pillow antes de guardarla: además de darnos el tamaño que
+    # necesita el mapa, confirma que es una imagen de verdad y no otra cosa con
+    # extensión cambiada.
+    try:
+        from PIL import Image
+        import io as _io
+        with Image.open(_io.BytesIO(datos)) as im:
+            im.verify()
+        with Image.open(_io.BytesIO(datos)) as im:
+            ancho, alto = im.size
+    except Exception:
+        return jsonify({'status': 'error',
+                        'message': 'El archivo no es una imagen válida'}), 400
+
+    nombre = f"plano-{int(time.time())}{extension}"
+    ruta = os.path.join(map_config.maps_dir(), nombre)
+    with open(ruta, 'wb') as f:
+        f.write(datos)
+
+    # Se borra el plano anterior: ya no lo referencia nadie y solo ocupa sitio
+    anterior = map_config.get_settings().get('image')
+    if anterior and anterior != nombre:
+        try:
+            os.remove(os.path.join(map_config.maps_dir(), anterior))
+        except OSError:
+            pass
+
+    map_config.save_image(nombre, ancho, alto)
+    audit.log(audit.MAP_SETTINGS, target=nombre,
+              details={'modo': 'image', 'tamano': f'{ancho}x{alto}'})
+    return jsonify({'status': 'success', **map_config.get_settings()})
+
+@app.route('/api/map/cameras/<cam_id>', methods=['PUT'])
+@admin_required
+def place_camera_on_map(cam_id):
+    """Coloca o mueve una cámara sobre el mapa."""
+    datos = request.json or {}
+    modo = datos.get('mode', map_config.get_settings()['mode'])
+    error = map_config.set_position(cam_id, modo, datos.get('x'), datos.get('y'))
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+
+    nombre = next((c['name'] for c in load_config().get('cameras', [])
+                   if c['id'] == cam_id), cam_id)
+    audit.log(audit.MAP_CAMERA_PLACED, target=nombre,
+              details={'modo': modo, 'x': datos.get('x'), 'y': datos.get('y')})
+    return jsonify({'status': 'success'})
+
+@app.route('/api/map/cameras/<cam_id>', methods=['DELETE'])
+@admin_required
+def remove_camera_from_map(cam_id):
+    """Quita la cámara del mapa. La cámara en sí no se toca."""
+    modo = request.args.get('mode') or map_config.get_settings()['mode']
+    error = map_config.clear_position(cam_id, modo)
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
+
+    nombre = next((c['name'] for c in load_config().get('cameras', [])
+                   if c['id'] == cam_id), cam_id)
+    audit.log(audit.MAP_CAMERA_REMOVED, target=nombre, details={'modo': modo})
+    return jsonify({'status': 'success'})
+
 
 @app.route('/api/live_layout', methods=['GET'])
 @login_required
@@ -668,6 +791,9 @@ def add_camera():
     config = load_config()
     new_cam = {
         "id": str(uuid.uuid4()),
+        # Número visible, distinto del identificador interno: se reaprovecha el
+        # hueco más bajo que hayan dejado las cámaras eliminadas.
+        "numero": siguiente_numero(config.get("cameras", [])),
         "name": data.get("name", "Unnamed"),
         "type": data.get("type", "IP"),
         "source": data.get("source", ""),
@@ -684,8 +810,8 @@ def add_camera():
     # siguiente ronda periódica
     health_monitor.refresh_soon()
     audit.log(audit.CAMERA_ADDED, target=new_cam['name'],
-              details={'id': new_cam['id'], 'tipo': new_cam['type'],
-                       'ptz': new_cam['is_ptz']})
+              details={'numero': new_cam['numero'], 'id': new_cam['id'],
+                       'tipo': new_cam['type'], 'ptz': new_cam['is_ptz']})
     return jsonify(new_cam)
 
 @app.route('/api/cameras/<cam_id>', methods=['PUT'])

@@ -30,3 +30,6 @@ recordings/
 # Configuracion del NVR: incluye la clave de acceso compartida y las rutas
 # de almacenamiento propias de cada instalacion.
 nvr_config.json
+
+# Planos que suba el administrador para el mapa: son de cada instalación
+static/maps/
