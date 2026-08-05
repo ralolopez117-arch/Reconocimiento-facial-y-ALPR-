@@ -2120,3 +2120,41 @@ body:not(.can-export-recordings) .perm-export-recordings {
 :root[data-theme="light"] .tab-icono[data-icono="tab-sesion"] {
     background-image: url("img/tab-sesion-light.png");
 }
+
+/* ---- Cerrar sesión ---- */
+
+/* Sustituye al emoji ⏻ que llevaba antes. Mismo mecanismo que el resto: fondo
+   de un elemento vacío, para que cada tema tenga su versión.
+
+   Deja de usar .btn-icon, que traía un margin-right de 15 px pensado para el
+   botón de la barra lateral. Aquí, siendo el último hijo de la ficha de
+   usuario, ese margen abría un hueco muerto contra el borde derecho.
+
+   El elemento no tiene texto, así que el nombre accesible lo aporta el
+   aria-label de la plantilla: sin él, un lector de pantalla anunciaría un
+   enlace sin nombre. */
+.icono-salir {
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    display: inline-block;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+    text-decoration: none;
+    cursor: pointer;
+    opacity: 0.75;
+    transition: opacity 0.2s;
+}
+
+.icono-salir:hover {
+    opacity: 1;
+}
+
+:root[data-theme="dark"] .icono-salir {
+    background-image: url("img/nav-logout-dark.png");
+}
+
+:root[data-theme="light"] .icono-salir {
+    background-image: url("img/nav-logout-light.png");
+}

@@ -73,3 +73,15 @@ por eso su `data-icono` empieza por `nav-` y no por `tab-`.
 El icono se apila sobre la etiqueta. La regla se limita con `:has(.tab-icono)` a
 las pestañas que llevan icono: los paneles de rostros y placas comparten la
 clase `.fr-tab` y siguen como estaban.
+
+## Cerrar sesión
+
+| Original | Derivados en `static/img/` | Dónde |
+|---|---|---|
+| `logout_dark_theme.png`<br>`logout_white_theme.png` | `nav-logout-{dark,light}.png` | Ficha de usuario, barra superior |
+
+Se muestra a 22 px: por debajo de 20 se pierde la flecha de salida, que es lo
+que distingue el icono de una puerta cualquiera.
+
+Al no llevar texto, el nombre accesible lo aporta el `aria-label` de la
+plantilla. Sin él, un lector de pantalla anunciaría un enlace sin nombre.
