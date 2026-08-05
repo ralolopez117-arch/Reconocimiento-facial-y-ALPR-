@@ -3632,7 +3632,93 @@ async function abrirMapa() {
 
     // Leaflet mide el contenedor al crearse. Aquí acaba de hacerse visible, así
     // que sin esto se queda con tamaño cero y solo pinta una esquina.
-    setTimeout(() => MAPA.leaflet && MAPA.leaflet.invalidateSize(), 60);
+    setTimeout(() => {
+        if (!MAPA.leaflet) return;
+        MAPA.leaflet.invalidateSize();
+        // El encuadre va después de medir: calculado sobre un contenedor de
+        // tamaño cero, el zoom saldría mal.
+        encuadrarEnLasCamaras();
+    }, 60);
+}
+
+// Zoom al abrir sobre una sola cámara: se ve la calle sin quedarse pegado al
+// tejado, que es lo que pasa al ampliar al máximo.
+const MAPA_ZOOM_UNA_CAMARA = 16;
+
+// Tope al encuadrar sobre un grupo: con varias cámaras muy juntas, ajustar sin
+// límite deja el mapa tan cerca que se pierde toda referencia del entorno.
+const MAPA_ZOOM_MAXIMO_ENCUADRE = 17;
+
+/**
+ * Abre el mapa mostrando dónde están las cámaras.
+ *
+ * Antes se abría siempre en el centro guardado en los ajustes, que rara vez
+ * coincide con la instalación, y obligaba a navegar hasta las cámaras cada vez.
+ *
+ * Sobre un plano propio no se hace nada: al construirlo ya se encaja la imagen
+ * entera, que es la vista útil de un plano.
+ */
+function encuadrarEnLasCamaras() {
+    if (!MAPA.leaflet || mapaEsImagen()) return;
+
+    const situadas = cameras.filter(c => c.map_geo);
+    const puntos = situadas.map(c => L.latLng(c.map_geo.lat, c.map_geo.lng));
+
+    if (!puntos.length) {
+        // Sin ninguna cámara situada se respeta el centro configurado
+        MAPA.leaflet.setView(MAPA.ajustes.center || [40.4168, -3.7038],
+                             MAPA.ajustes.zoom || 6);
+        return;
+    }
+
+    if (puntos.length === 1) {
+        MAPA.leaflet.setView(puntos[0], MAPA_ZOOM_UNA_CAMARA);
+        return;
+    }
+
+    const principales = grupoPrincipalDeCamaras(puntos);
+    MAPA.leaflet.fitBounds(L.latLngBounds(principales), {
+        padding: [50, 50],
+        maxZoom: MAPA_ZOOM_MAXIMO_ENCUADRE,
+    });
+
+    const fuera = puntos.length - principales.length;
+    if (fuera > 0) {
+        mensajeDeMapa(`Vista centrada en ${principales.length} de ${puntos.length} `
+                      + `cámaras; ${fuera} queda${fuera > 1 ? 'n' : ''} lejos`);
+    }
+}
+
+/**
+ * Descarta las cámaras sueltas para encuadrar donde está el grueso.
+ *
+ * Encajar todas sin más falla en cuanto hay una lejos del resto: con veinte
+ * cámaras en un recinto y una en otra ciudad, el mapa se abre mostrando el país
+ * entero y no se distingue ninguna.
+ *
+ * Se usa la mediana y no el promedio, tanto para el centro como para la
+ * distancia, porque el promedio lo arrastra precisamente el punto que se quiere
+ * ignorar. El umbral es generoso —cuatro veces la distancia típica— para
+ * apartar solo lo que está desproporcionadamente lejos, y nunca deja menos de
+ * dos cámaras: si todas están dispersas, lo honesto es mostrarlas todas.
+ */
+function grupoPrincipalDeCamaras(puntos) {
+    const mediana = valores => {
+        const o = [...valores].sort((a, b) => a - b);
+        const m = Math.floor(o.length / 2);
+        return o.length % 2 ? o[m] : (o[m - 1] + o[m]) / 2;
+    };
+
+    const centro = L.latLng(mediana(puntos.map(p => p.lat)),
+                            mediana(puntos.map(p => p.lng)));
+    const distancias = puntos.map(p => centro.distanceTo(p));
+
+    // Suelo de 2 km: con las cámaras de un mismo edificio la distancia típica
+    // es de metros, y multiplicarla por cuatro seguiría siendo tan pequeña que
+    // descartaría vecinas legítimas.
+    const limite = Math.max(mediana(distancias) * 4, 2000);
+    const dentro = puntos.filter((_, i) => distancias[i] <= limite);
+    return dentro.length >= 2 ? dentro : puntos;
 }
 
 function construirMapa() {
@@ -4039,7 +4125,11 @@ async function guardarAjustesDelMapa() {
     dibujarMarcadores();
     renderListaDelMapa();
     actualizarEtiquetasManuales();
-    setTimeout(() => MAPA.leaflet && MAPA.leaflet.invalidateSize(), 60);
+    setTimeout(() => {
+        if (!MAPA.leaflet) return;
+        MAPA.leaflet.invalidateSize();
+        encuadrarEnLasCamaras();
+    }, 60);
     mensajeDeMapa('Fondo del mapa actualizado');
 }
 
