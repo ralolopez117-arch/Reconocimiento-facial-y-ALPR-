@@ -2580,10 +2580,51 @@ body:not(.can-export-recordings) .perm-export-recordings {
     border: none;
 }
 
-/* El marcador crece o se reduce según el zoom, para no tapar el mapa cuando se
-   ve mucho terreno. Lo controla la clase detalle-* que app.js pone en el
-   contenedor; aquí solo se describe cada nivel. */
+/* El marcador se ancla en el punto geográfico exacto: Leaflet coloca aquí un
+   elemento sin tamaño y todo lo demás se posiciona respecto a ese origen. Si el
+   ancho del rótulo condicionara la caja, un nombre largo desplazaría el pin y
+   dejaría de señalar el sitio correcto. */
 .map-marcador {
+    position: absolute;
+    left: 0;
+    top: 0;
+    /* El envoltorio no intercepta clics; sí lo hacen el pin y la etiqueta */
+    pointer-events: none;
+}
+
+/* El pin, con su punta sobre la ubicación.
+
+   La imagen lleva una elipse de sombra en la base, y el punto de apoyo real es
+   el centro de esa elipse, que está al 93,16 % de la altura. De ahí el
+   desplazamiento vertical: colocando simplemente el borde inferior sobre el
+   punto, el pin quedaría señalando unos píxeles más abajo de lo indicado. */
+.map-pin {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform: translate(-50%, -93.16%);
+    background-image: url("img/pin-camara.png");
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    /* Proporción del original: 102 × 128 */
+    aspect-ratio: 102 / 128;
+    pointer-events: auto;
+    cursor: pointer;
+    transition: height 0.15s ease, transform 0.15s ease;
+    filter: drop-shadow(0 1px 2px rgba(0,0,0,0.45));
+}
+
+.map-marcador:hover .map-pin {
+    transform: translate(-50%, -93.16%) scale(1.12);
+}
+
+/* Etiqueta bajo el pin, centrada en el mismo punto */
+.map-etiqueta {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform: translate(-50%, 5px);
     display: inline-flex;
     align-items: center;
     gap: 5px;
@@ -2593,19 +2634,14 @@ body:not(.can-export-recordings) .perm-export-recordings {
     box-shadow: 0 1px 6px rgba(0,0,0,0.45);
     white-space: nowrap;
     color: var(--text-main);
+    pointer-events: auto;
     cursor: pointer;
-    /* Se anima el tamaño para que al alejarse los rótulos no desaparezcan de
-       golpe, que se lee como un parpadeo. */
-    transition: padding 0.15s ease, transform 0.15s ease;
+    transition: padding 0.15s ease;
 }
 
-.map-marcador:hover {
-    transform: scale(1.08);
-    z-index: 500;
-}
-
-.map-marcador.estado-online  { border-color: #22c55e; }
-.map-marcador.estado-offline { border-color: #ef4444; opacity: 0.8; }
+.map-marcador.estado-online  .map-etiqueta { border-color: #22c55e; }
+.map-marcador.estado-offline .map-etiqueta { border-color: #ef4444; }
+.map-marcador.estado-offline .map-pin      { opacity: 0.65; }
 
 .map-marcador-num {
     display: inline-flex;
@@ -2625,12 +2661,18 @@ body:not(.can-export-recordings) .perm-export-recordings {
     text-overflow: ellipsis;
 }
 
-/* ---- Nivel de detalle ---- */
+/* ---- Nivel de detalle ----
 
-/* Alejado: solo el número, en un círculo pequeño. Sin relleno alrededor, el
-   marcador es el propio círculo y ocupa lo mínimo. */
-.map-lienzo.detalle-minimo .map-marcador,
-.map-lienzo.detalle-medio .map-marcador {
+   Con el mapa alejado, un rótulo con el nombre por cada cámara tapa lo que se
+   quiere ver y varios nombres se solapan. Se muestra entonces solo el número, y
+   el pin se encoge para no dominar la vista. */
+
+.map-lienzo.detalle-minimo .map-pin  { height: 26px; }
+.map-lienzo.detalle-medio .map-pin   { height: 32px; }
+.map-lienzo.detalle-completo .map-pin { height: 38px; }
+
+.map-lienzo.detalle-minimo .map-etiqueta,
+.map-lienzo.detalle-medio .map-etiqueta {
     padding: 0;
 }
 
@@ -2640,20 +2682,20 @@ body:not(.can-export-recordings) .perm-export-recordings {
 }
 
 .map-lienzo.detalle-minimo .map-marcador-num {
-    width: 18px;
-    height: 18px;
+    width: 17px;
+    height: 17px;
     font-size: 9px;
 }
 
 .map-lienzo.detalle-medio .map-marcador-num {
-    width: 22px;
-    height: 22px;
-    font-size: 11px;
+    width: 20px;
+    height: 20px;
+    font-size: 10px;
 }
 
-/* Acercado: número y nombre. El texto se mantiene pequeño y con un ancho
-   máximo, porque un nombre largo a tamaño de interfaz taparía media calle. */
-.map-lienzo.detalle-completo .map-marcador {
+/* Acercado: número y nombre. El texto se mantiene pequeño y con ancho máximo,
+   porque un nombre largo a tamaño de interfaz taparía media calle. */
+.map-lienzo.detalle-completo .map-etiqueta {
     padding: 2px 9px 2px 2px;
 }
 
@@ -2668,14 +2710,14 @@ body:not(.can-export-recordings) .perm-export-recordings {
     max-width: 132px;
 }
 
-/* Con el nombre oculto hace falta otra forma de saber cuál es cada cámara sin
-   tener que acercarse: al pasar por encima aparece junto al marcador. */
+/* Con el nombre oculto hace falta otra forma de identificar una cámara sin
+   tener que acercarse: al pasar por encima aparece sobre el pin. */
 .map-marcador-globo {
     display: none;
     position: absolute;
-    left: 50%;
-    bottom: calc(100% + 6px);
-    transform: translateX(-50%);
+    left: 0;
+    top: 0;
+    transform: translate(-50%, calc(-100% - 42px));
     padding: 3px 8px;
     border-radius: 6px;
     background: var(--modal-bg);
@@ -2694,9 +2736,9 @@ body:not(.can-export-recordings) .perm-export-recordings {
     display: block;
 }
 
-/* El globo se sitúa respecto al marcador */
-.map-lienzo .map-marcador {
-    position: relative;
+/* El marcador señalado se dibuja por encima de los vecinos */
+.map-marcador-envoltorio:hover {
+    z-index: 1000 !important;
 }
 
 .map-msg {

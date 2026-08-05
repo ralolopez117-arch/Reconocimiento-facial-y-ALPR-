@@ -3727,15 +3727,23 @@ function actualizarDetalleDeMarcadores() {
 
 function iconoDeCamara(cam, colocadaAhora) {
     const salud = cameraStatus[cam.id] || { status: 'unknown' };
+    // El icono no tiene tamaño y se ancla en el propio punto geográfico: el pin
+    // y la etiqueta se colocan después con transformaciones respecto a ese
+    // origen. Así la punta del pin cae siempre sobre la ubicación exacta,
+    // independientemente de lo largo que sea el nombre. Dejando que el ancho
+    // del rótulo condicionara la caja, un nombre largo desplazaba el pin.
     return L.divIcon({
         className: 'map-marcador-envoltorio',
         html: `<span class="map-marcador estado-${salud.status}">
-                   <span class="map-marcador-num">${cam.numero || ''}</span>
-                   <span class="map-marcador-nombre">${cam.name}</span>
+                   <span class="map-pin"></span>
+                   <span class="map-etiqueta">
+                       <span class="map-marcador-num">${cam.numero || ''}</span>
+                       <span class="map-marcador-nombre">${cam.name}</span>
+                   </span>
                    <span class="map-marcador-globo">${cam.name}</span>
                </span>`,
-        iconSize: null,
-        iconAnchor: [10, 10],
+        iconSize: [0, 0],
+        iconAnchor: [0, 0],
     });
 }
 
