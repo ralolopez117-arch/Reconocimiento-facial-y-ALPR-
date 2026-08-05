@@ -52,14 +52,7 @@
             <img class="nav-logo" src="{{ url_for('static', filename='img/logo-64.png') }}"
                  alt="" width="28" height="28">
             <h1 style="font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Centro de Monitoreo Inteligente</h1>
-            <button id="open-map-btn" class="btn-secondary" title="Mapa de cámaras">
-                <span class="nav-icon nav-icon-svg" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                         stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M9 3 3 5.5v15L9 18l6 3 6-2.5v-15L15 6 9 3Z"/>
-                        <path d="M9 3v15M15 6v15"/>
-                    </svg>
-                </span><span class="nav-label">Mapa</span></button>
+            <button id="open-map-btn" class="btn-secondary" title="Mapa de cámaras"><span class="nav-icon" data-icono="mapa"></span><span class="nav-label">Mapa</span></button>
             <!-- Compact icon-only buttons for FR and ALPR -->
             <button id="open-fr-btn" class="btn-secondary" title="Reconocimiento Facial"><span class="nav-icon" data-icono="reconocimiento-facial"></span><span class="nav-label">Reconocimiento Facial</span></button>
             <button id="open-alpr-btn" class="btn-secondary" title="Placas (ALPR)"><span class="nav-icon" data-icono="alpr"></span><span class="nav-label">Placas (ALPR)</span></button>

@@ -701,6 +701,13 @@ body {
 
 /* Las rutas son relativas a este archivo, que se sirve desde /static/,
    de modo que img/… apunta a /static/img/… */
+:root[data-theme="dark"] .nav-icon[data-icono="mapa"] {
+    background-image: url("img/nav-mapa-dark.png");
+}
+:root[data-theme="light"] .nav-icon[data-icono="mapa"] {
+    background-image: url("img/nav-mapa-light.png");
+}
+
 :root[data-theme="dark"] .nav-icon[data-icono="alpr"] {
     background-image: url("img/nav-alpr-dark.png");
 }
@@ -2364,15 +2371,6 @@ body:not(.can-export-recordings) .perm-export-recordings {
 /* ===========================================================================
    Mapa de cámaras
    =========================================================================== */
-
-/* El botón del mapa lleva un SVG en lugar de una imagen por tema: al dibujarse
-   con currentColor sigue al color del texto y no hace falta una versión por
-   tema, a diferencia de los iconos que son ilustraciones. */
-.nav-icon-svg svg {
-    width: 100%;
-    height: 100%;
-    display: block;
-}
 
 .map-modal {
     width: min(1200px, 94vw);
